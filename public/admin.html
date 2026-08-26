@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Incandescence · 管理后台</title>
+  <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4.6.0">
+</head>
+<body class="admin-body">
+  <main class="admin-auth-view" id="auth-view">
+    <section class="admin-auth-card">
+      <img class="brand-mark brand-logo large" src="/favicon.svg?v=4.6.0" alt="">
+      <div class="eyebrow">ADMIN CONTROL</div>
+      <h1 id="auth-title">管理员登录</h1>
+      <p id="auth-description">登录后管理抓取凭证、阅读账号和自动更新。</p>
+      <form id="auth-form">
+        <label>管理员密码
+          <input id="admin-password" type="password" minlength="10" maxlength="256" autocomplete="current-password" required>
+        </label>
+        <label id="confirm-password-row" hidden>再次输入密码
+          <input id="admin-password-confirm" type="password" minlength="10" maxlength="256" autocomplete="new-password">
+        </label>
+        <button class="primary-button wide-button" id="auth-submit" type="submit">登录</button>
+      </form>
+      <div class="auth-error" id="auth-error" role="alert"></div>
+      <a class="back-reader-link" href="/">← 返回公开阅读页</a>
+    </section>
+  </main>
+
+  <div class="admin-app" id="admin-app" hidden>
+    <header class="admin-topbar">
+      <a class="admin-brand" href="/admin">
+        <img class="brand-mark brand-logo" src="/favicon.svg?v=4.6.0" alt="">
+        <span><strong>Incandescence</strong><small>管理后台</small></span>
+      </a>
+      <nav>
+        <a class="secondary-button button-link" href="#user-management">用户管理</a>
+        <a class="secondary-button button-link" href="#member-management">会员管理</a>
+        <a class="secondary-button button-link" href="#notification-panel">通知设置</a>
+        <a class="secondary-button button-link" href="/" target="_blank">查看公开站</a>
+        <button class="secondary-button" id="logout" type="button">退出登录</button>
+      </nav>
+    </header>
+
+    <main class="admin-main">
+      <header class="admin-page-heading">
+        <div>
+          <div class="eyebrow">LOCAL OPERATIONS</div>
+          <h1>抓取与内容管理</h1>
+          <p>只有管理员能看到此页面；公开站始终只读。</p>
+        </div>
+        <button class="primary-button" id="sync-all" type="button">↻ 立即增量更新全部</button>
+      </header>
+
+      <section class="admin-stat-grid" aria-label="运行状态">
+        <article><span>公开账号</span><strong id="stat-accounts">—</strong><small id="stat-account-total">等待读取</small></article>
+        <article><span>有效抓取凭证</span><strong id="stat-sessions">—</strong><small id="stat-scraper-version">免费组件</small></article>
+        <article><span>自动更新</span><strong id="stat-schedule">—</strong><small id="stat-next-run">等待状态</small></article>
+        <article><span>当前任务</span><strong id="stat-sync">—</strong><small id="stat-last-result">无任务</small></article>
+      </section>
+
+      <div class="admin-layout">
+        <div class="admin-primary-column">
+          <section class="admin-panel proxy-panel" id="proxy-panel">
+            <header class="admin-panel-heading">
+              <div>
+                <div class="eyebrow">NETWORK PROXY</div>
+                <h2>访问 X 的网络代理</h2>
+                <p>中国大陆网络环境通常需要代理。开启后，凭证验证、内容抓取、头像和媒体下载都会使用同一个代理。</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="proxy-enabled"><span></span></label>
+            </header>
+            <div class="proxy-settings-block standalone">
+              <label class="proxy-url-label">代理地址
+                <input type="text" id="proxy-url" autocomplete="off" spellcheck="false" placeholder="例如 http://127.0.0.1:7890">
+              </label>
+              <div class="proxy-actions">
+                <span id="proxy-test-result">支持 HTTP、HTTPS、SOCKS5；如有账号密码可直接写在 URL 中</span>
+                <div class="row-actions">
+                  <button type="button" class="secondary-button" id="test-proxy">测试连接</button>
+                  <button type="button" class="primary-button" id="save-proxy">保存代理</button>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="admin-panel notification-panel" id="notification-panel">
+            <header class="admin-panel-heading">
+              <div>
+                <div class="eyebrow">BARK NOTIFICATIONS</div>
+                <h2>Bark 更新通知</h2>
+                <p>只在增量更新抓到新内容时推送；首次归档不会发送历史内容提醒。通知包含账号头像、新增数量、内容摘要和阅读链接。</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="bark-enabled"><span></span></label>
+            </header>
+            <div class="bark-settings-grid">
+              <label>Bark 服务器地址
+                <input type="url" id="bark-server-url" autocomplete="off" spellcheck="false" placeholder="https://api.day.app">
+              </label>
+              <label>Device Key
+                <input type="password" id="bark-device-key" autocomplete="new-password" spellcheck="false" placeholder="从 Bark App 复制，留空不修改">
+              </label>
+              <label>通知分组
+                <input type="text" id="bark-group" maxlength="64" placeholder="Incandescence">
+              </label>
+              <label>站点访问地址
+                <input type="url" id="site-base-url" autocomplete="off" spellcheck="false" placeholder="例如 http://192.168.1.20:8787">
+              </label>
+            </div>
+            <div class="bark-help" id="bark-key-state">Device Key 尚未保存。站点地址建议填写其他设备可以访问的局域网地址。</div>
+            <div class="proxy-actions bark-actions">
+              <span id="bark-test-result">保存后可以发送测试通知</span>
+              <div class="row-actions">
+                <button type="button" class="text-button danger-text" id="clear-bark-key">清除密钥</button>
+                <button type="button" class="secondary-button" id="test-bark">测试推送</button>
+                <button type="button" class="primary-button" id="save-bark">保存通知设置</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="admin-panel" id="credential-panel">
+            <header class="admin-panel-heading">
+              <div>
+                <div class="eyebrow">X CREDENTIALS</div>
+                <h2>抓取账号凭证</h2>
+                <p>可粘贴完整 Cookie 字符串、Cookie 请求头、Copy as cURL、JSON 或表格；系统只提取所需字段，并在保存前向 X 验证。</p>
+              </div>
+              <span class="pill" id="scraper-health">检查中</span>
+            </header>
+
+            <div class="session-list admin-session-list" id="session-list"></div>
+
+            <div class="credential-form">
+              <div class="credential-form-row">
+                <label>会话备注（可选）
+                  <input id="session-label" maxlength="40" placeholder="留空则使用验证到的 X 用户名">
+                </label>
+                <div class="cookie-detection" id="cookie-detection">等待粘贴 Cookie</div>
+              </div>
+              <label>完整 Cookie / 请求头 / JSON
+                <textarea id="session-cookies" rows="7" spellcheck="false" autocomplete="off" placeholder="直接粘贴全部 Cookie；无需手动寻找 auth_token 和 ct0"></textarea>
+              </label>
+              <div class="credential-notice">
+                <strong>隐私说明</strong>
+                <span>原始 Cookie 不会返回到网页，也不会写入日志；验证通过后只保存 <code>auth_token</code> 与 <code>ct0</code>。</span>
+              </div>
+              <div class="form-actions align-end">
+                <button class="primary-button" id="add-session" type="button">提取、验证并保存</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="admin-panel" id="user-management">
+            <header class="admin-panel-heading inline-heading">
+              <div>
+                <div class="eyebrow">USER MANAGEMENT</div>
+                <h2>用户管理</h2>
+                <p>管理抓取用户、内容范围与公开状态。关闭公开展示后，游客无法访问其主页、内容或本地媒体，管理员仍可预览。</p>
+              </div>
+              <form class="admin-add-account" id="add-account-form">
+                <span>@</span>
+                <input id="new-username" maxlength="15" placeholder="username" required>
+                <button class="primary-button" type="submit">添加</button>
+              </form>
+            </header>
+            <div class="admin-account-list" id="admin-account-list"></div>
+          </section>
+
+          <section class="admin-panel" id="member-management">
+            <header class="admin-panel-heading inline-heading">
+              <div>
+                <div class="eyebrow">MEMBER ACCESS</div>
+                <h2>会员管理</h2>
+                <p>为每个会员单独分配可查看的用户。公开用户仍可被游客查看；非公开用户只有管理员和获授权会员可以访问。</p>
+              </div>
+              <form class="admin-add-member" id="add-member-form">
+                <input id="new-member-username" maxlength="32" autocomplete="off" placeholder="会员名" required>
+                <input id="new-member-password" type="password" minlength="8" maxlength="256" autocomplete="new-password" placeholder="初始密码" required>
+                <button class="primary-button" type="submit">创建会员</button>
+              </form>
+            </header>
+            <div class="admin-member-list" id="admin-member-list"></div>
+          </section>
+        </div>
+
+        <aside class="admin-secondary-column">
+          <section class="admin-panel sticky-panel">
+            <header class="admin-panel-heading">
+              <div>
+                <div class="eyebrow">SCHEDULER</div>
+                <h2>自动增量更新</h2>
+                <p>有历史游标时只扫描更新内容，已下载媒体不会重复下载。</p>
+              </div>
+              <label class="switch"><input type="checkbox" id="schedule-enabled"><span></span></label>
+            </header>
+            <div class="admin-settings-grid">
+              <label>更新间隔（分钟）<input type="number" id="schedule-minutes" min="5" max="10080"></label>
+              <label>首次读取条数<input type="number" id="initial-limit" min="20" max="500"></label>
+              <label>增量扫描上限<input type="number" id="incremental-limit" min="40" max="3200"></label>
+              <label>媒体并发数<input type="number" id="media-concurrency" min="1" max="6"></label>
+              <label>单个媒体上限（MB）<input type="number" id="max-media-mb" min="10" max="2000"></label>
+            </div>
+            <button class="primary-button wide-button" id="save-settings" type="button">保存更新设置</button>
+          </section>
+        </aside>
+      </div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/admin.js?v=4.6.0" defer></script>
+</body>
+</html>

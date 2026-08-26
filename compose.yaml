@@ -1,0 +1,13 @@
+name: incandescence-reader
+
+services:
+  reader:
+    build: .
+    container_name: incandescence-reader
+    restart: unless-stopped
+    ports:
+      - "8787:8787"
+    volumes:
+      - ./data:/data
+    environment:
+      TZ: Asia/Shanghai

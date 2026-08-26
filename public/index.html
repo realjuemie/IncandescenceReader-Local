@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Incandescence · X 内容阅读</title>
+  <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4.6.0">
+</head>
+<body>
+  <div class="app-shell public-shell">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand-row">
+        <img class="brand-mark brand-logo" src="/favicon.svg?v=4.6.0" alt="">
+        <div>
+          <div class="brand-name">Incandescence</div>
+          <div class="brand-sub">PUBLIC READER</div>
+        </div>
+        <button class="icon-button mobile-only" id="close-sidebar" aria-label="关闭侧栏">×</button>
+      </div>
+
+      <div class="section-label public-account-label">阅读账号</div>
+      <nav class="account-list" id="account-list" aria-label="阅读账号"></nav>
+
+      <div class="sidebar-footer">
+        <div class="reader-member-status" id="reader-member-status"></div>
+        <div class="public-note">
+          <strong>只读内容站</strong>
+          <span>内容和媒体来自站点本地存储</span>
+        </div>
+        <a class="admin-link" href="/">账号导航 <span>›</span></a>
+      </div>
+    </aside>
+
+    <div class="sidebar-scrim" id="sidebar-scrim"></div>
+
+    <main class="main-column">
+      <header class="mobile-header">
+        <button class="icon-button" id="open-sidebar" aria-label="打开账号列表">☰</button>
+        <a class="mobile-home-link" href="/"><img src="/favicon.svg?v=4.6.0" alt="">Incandescence</a>
+        <span class="mobile-header-spacer" aria-hidden="true"></span>
+      </header>
+
+      <section class="empty-state" id="empty-state">
+        <div class="empty-orbit"><span>＠</span></div>
+        <h1>这里还没有公开内容</h1>
+        <p>管理员添加阅读账号并完成首次抓取后，内容会自动出现在这里。</p>
+      </section>
+
+      <div id="reader" hidden>
+        <section class="profile-hero">
+          <div class="banner-wrap"><img id="profile-banner" alt="" hidden></div>
+          <div class="profile-content public-profile-content">
+            <div class="profile-avatar" id="profile-avatar"></div>
+            <div class="profile-copy">
+              <div class="profile-title-row">
+                <div>
+                  <h1 id="profile-name"></h1>
+                  <div class="profile-handle" id="profile-handle"></div>
+                </div>
+                <div class="public-updated" id="public-updated"></div>
+              </div>
+              <p class="profile-bio" id="profile-bio"></p>
+              <div class="profile-meta" id="profile-meta"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="timeline-toolbar">
+          <div class="tabs" id="timeline-tabs" aria-label="内容类型">
+            <button class="tab active" data-kind="all">全部</button>
+            <button class="tab" data-kind="originals">原创</button>
+            <button class="tab" data-kind="replies">回复</button>
+            <button class="tab" data-kind="reposts">转发</button>
+            <button class="tab" data-kind="media">媒体</button>
+          </div>
+          <div class="timeline-filter-row">
+            <label class="search-box">
+              <span aria-hidden="true">⌕</span>
+              <input id="tweet-search" type="search" placeholder="搜索本站内容">
+            </label>
+            <div class="date-filter" aria-label="按年月筛选">
+              <span class="date-filter-icon" aria-hidden="true">▣</span>
+              <select id="filter-year" aria-label="筛选年份"><option value="">全部年份</option></select>
+              <span class="date-filter-divider" aria-hidden="true"></span>
+              <select id="filter-month" aria-label="筛选月份" disabled><option value="">全部月份</option></select>
+              <button class="date-filter-reset" id="reset-date-filter" type="button" hidden aria-label="清除时间筛选">×</button>
+            </div>
+          </div>
+        </section>
+
+        <section class="timeline" id="timeline" aria-live="polite"></section>
+        <div class="timeline-footer">
+          <button class="secondary-button" id="load-more" hidden>加载更早内容</button>
+          <div class="loading-row" id="timeline-loading" hidden><span class="spinner"></span>正在读取本站内容…</div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <div class="image-lightbox" id="image-lightbox" hidden role="dialog" aria-modal="true" aria-label="图片预览">
+    <button class="lightbox-close" id="lightbox-close" type="button" aria-label="关闭图片预览">×</button>
+    <figure class="lightbox-content">
+      <img id="lightbox-image" alt="">
+      <figcaption id="lightbox-caption" hidden></figcaption>
+    </figure>
+  </div>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/app.js?v=4.6.0" defer></script>
+</body>
+</html>

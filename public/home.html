@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Incandescence · 账号导航</title>
+  <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4.6.0">
+</head>
+<body class="home-body">
+  <header class="home-topbar">
+    <a class="admin-brand" href="/">
+      <img class="site-logo" src="/favicon.svg?v=4.6.0" alt="">
+      <span><strong>Incandescence</strong><small>本地 X 内容导航</small></span>
+    </a>
+    <div class="public-member-status" id="home-member-status"></div>
+  </header>
+
+  <main class="home-main">
+    <section class="home-hero">
+      <div class="home-hero-copy">
+        <div class="eyebrow">CURATED LOCALLY</div>
+        <h1>关注的人，<br><em>安静地留在这里。</em></h1>
+        <p>选择一个账号阅读已保存到本站的内容，或者前往其 X 官方主页。本站不会要求访客登录 X。</p>
+        <div class="home-summary" id="home-summary">正在读取账号…</div>
+      </div>
+      <div class="home-orbit" aria-hidden="true">
+        <img src="/favicon.svg?v=4.6.0" alt="">
+      </div>
+    </section>
+
+    <section class="home-directory">
+      <header>
+        <div>
+          <div class="eyebrow">ACCOUNT DIRECTORY</div>
+          <h2>账号导航</h2>
+        </div>
+        <span id="home-refresh-time"></span>
+      </header>
+      <div class="home-account-grid" id="home-account-grid" aria-live="polite"></div>
+    </section>
+  </main>
+
+  <footer class="home-footer">
+    <span>Incandescence · 媒体与内容保存在站点本地</span>
+  </footer>
+
+  <div class="toast" id="toast" role="status"></div>
+  <script src="/home.js?v=4.6.0" defer></script>
+</body>
+</html>

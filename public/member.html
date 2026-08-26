@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <title>Incandescence · 会员登录</title>
+  <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css?v=4.6.0">
+</head>
+<body class="member-body">
+  <main class="member-auth-view">
+    <section class="member-auth-card">
+      <a class="member-login-brand" href="/">
+        <img src="/favicon.svg?v=4.6.0" alt="">
+        <span>Incandescence</span>
+      </a>
+      <div class="eyebrow">MEMBER ACCESS</div>
+      <h1>会员登录</h1>
+      <p>登录后可查看管理员分配给你的用户和本地归档内容。</p>
+
+      <form id="member-login-form">
+        <label>会员名
+          <input id="member-username" autocomplete="username" maxlength="32" required>
+        </label>
+        <label>密码
+          <input id="member-password" type="password" autocomplete="current-password" maxlength="256" required>
+        </label>
+        <button class="primary-button wide-button" id="member-login-submit" type="submit">登录并继续</button>
+      </form>
+
+      <div class="member-current" id="member-current" hidden>
+        <strong id="member-current-name"></strong>
+        <span>当前会员已登录</span>
+        <a class="primary-button button-link wide-button" id="member-continue" href="/">继续阅读</a>
+        <button class="secondary-button wide-button" id="member-logout" type="button">退出当前会员</button>
+      </div>
+
+      <div class="auth-error" id="member-login-error" role="alert"></div>
+      <a class="back-reader-link" href="/">← 返回账号导航</a>
+    </section>
+  </main>
+  <script src="/member.js?v=4.6.0" defer></script>
+</body>
+</html>

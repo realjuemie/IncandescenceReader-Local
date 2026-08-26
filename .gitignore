@@ -1,0 +1,13 @@
+data/
+.venv/
+__pycache__/
+*.py[cod]
+*.log
+.env
+.DS_Store
+Thumbs.db
+coverage/
+.codex-runtime-test*/
+.tmp-admin-test-*/
+.tmp-member-test-*/
+.tmp-bark-test-*/
