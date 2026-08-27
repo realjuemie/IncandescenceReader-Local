@@ -5,7 +5,6 @@ const state = {
   accounts: [], selectedId: null, cursor: null, kind: "all", query: "",
   year: "", month: "", availableMonths: [], loading: false,
   member: null, toastTimer: null, searchTimer: null, lightboxReturnFocus: null,
-  nestedTweetIds: new Set(),
 };
 
 async function api(path, options = {}) {
@@ -258,7 +257,6 @@ async function loadTweets(append) {
   $("#load-more").hidden = true;
   if (!append) {
     state.cursor = null;
-    state.nestedTweetIds.clear();
     $("#timeline").replaceChildren();
   }
   const params = new URLSearchParams({ limit: "30", kind: state.kind });
@@ -269,13 +267,9 @@ async function loadTweets(append) {
   try {
     const page = await api(`/api/public/accounts/${state.selectedId}/tweets?${params}`);
     for (const tweet of page.items) {
-      if (!tweet.repliedTo?.id) continue;
-      state.nestedTweetIds.add(String(tweet.repliedTo.id));
-      document.querySelector(`[data-tweet-id="${tweet.repliedTo.id}"]`)?.remove();
-    }
-    for (const tweet of page.items) {
-      if (state.nestedTweetIds.has(String(tweet.id))) continue;
-      $("#timeline").append(renderTweet(tweet));
+      $("#timeline").append(renderTweet(tweet, {
+        showReplyParent: state.kind !== "all",
+      }));
     }
     state.cursor = page.nextCursor;
     $("#load-more").hidden = !state.cursor;
@@ -295,7 +289,7 @@ async function loadTweets(append) {
   }
 }
 
-function renderTweet(tweet) {
+function renderTweet(tweet, { showReplyParent = true } = {}) {
   const article = document.createElement("article");
   article.className = tweet.isReply ? "tweet-card reply-tweet-card" : "tweet-card";
   article.dataset.tweetId = String(tweet.id);
@@ -307,7 +301,7 @@ function renderTweet(tweet) {
 
   const frame = document.createElement("div");
   frame.className = "reply-frame";
-  if (tweet.repliedTo) {
+  if (showReplyParent && tweet.repliedTo) {
     const parent = renderTweetEntry(tweet.repliedTo);
     const parentEntry = document.createElement("div");
     parentEntry.className = "reply-thread-entry reply-parent-entry";

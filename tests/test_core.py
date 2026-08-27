@@ -603,9 +603,14 @@ class DatabaseTests(unittest.TestCase):
             original = attach_photo(sample_tweet("223", "own original media"), "own-photo")
             db.insert_tweets(account["id"], [parent, reply, repost, original])
 
+            all_page = db.list_tweets(account["id"], kind="all")
             page = db.list_tweets(account["id"], kind="media")
             items = {item["id"]: item for item in page["items"]}
 
+            self.assertEqual(
+                [item["id"] for item in all_page["items"]],
+                ["223", "222", "221", "220"],
+            )
             self.assertEqual(set(items), {"221", "223"})
             self.assertEqual(len(items["221"]["media"]), 1)
             self.assertEqual(items["221"]["media"][0]["type"], "photo")
