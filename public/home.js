@@ -3,6 +3,36 @@
 const $ = (selector) => document.querySelector(selector);
 let toastTimer = null;
 let currentMember = null;
+const HOME_LAYOUT_KEY = "incandescence-home-layout";
+let homeLayout = readSavedLayout();
+
+function readSavedLayout() {
+  try {
+    return localStorage.getItem(HOME_LAYOUT_KEY) === "compact" ? "compact" : "banner";
+  } catch (_) {
+    return "banner";
+  }
+}
+
+function setHomeLayout(layout, persist = true) {
+  homeLayout = layout === "compact" ? "compact" : "banner";
+  const grid = $("#home-account-grid");
+  grid.dataset.layout = homeLayout;
+  document.body.classList.toggle("home-compact-layout", homeLayout === "compact");
+  document.querySelectorAll("[data-home-layout]").forEach((button) => {
+    button.setAttribute("aria-pressed", String(button.dataset.homeLayout === homeLayout));
+  });
+  if (persist) {
+    try { localStorage.setItem(HOME_LAYOUT_KEY, homeLayout); } catch (_) { /* storage unavailable */ }
+  }
+}
+
+function setupLayoutToggle() {
+  document.querySelectorAll("[data-home-layout]").forEach((button) => {
+    button.addEventListener("click", () => setHomeLayout(button.dataset.homeLayout));
+  });
+  setHomeLayout(homeLayout, false);
+}
 
 async function api(path, options = {}) {
   const init = { ...options, headers: { ...(options.headers || {}) } };
@@ -130,13 +160,15 @@ function createAccountCard(account) {
   const reader = document.createElement("a");
   reader.className = "primary-button button-link";
   reader.href = `/reader?account=${account.id}`;
-  reader.textContent = "阅读本站内容";
+  reader.setAttribute("aria-label", `阅读 ${account.displayName} 的本站内容`);
+  reader.innerHTML = '<span class="home-action-wide">阅读本站内容</span><span class="home-action-compact">阅读</span>';
   const official = document.createElement("a");
   official.className = "secondary-button button-link";
   official.href = `https://x.com/${encodeURIComponent(account.username)}`;
   official.target = "_blank";
   official.rel = "noopener noreferrer";
-  official.textContent = "X 官方主页 ↗";
+  official.setAttribute("aria-label", `打开 ${account.displayName} 的 X 官方主页`);
+  official.innerHTML = '<span class="home-action-wide">X 官方主页 ↗</span><span class="home-action-compact">X 主页</span>';
   actions.append(reader, official);
   body.append(title, handle, bio, meta, updated, actions);
   article.append(cover, avatar, body);
@@ -174,5 +206,6 @@ function showToast(message, error = false) {
   toastTimer = setTimeout(() => toast.classList.remove("show"), 4200);
 }
 
+setupLayoutToggle();
 loadDirectory();
 window.setInterval(loadDirectory, 30000);

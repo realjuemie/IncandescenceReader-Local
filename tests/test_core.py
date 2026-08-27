@@ -331,6 +331,22 @@ class DatabaseTests(unittest.TestCase):
                 connection.close()
             db = Database(path)
             self.assertTrue(bool(db.get_account(1)["is_public"]))
+            self.assertIn("last_sync_failed_at", db.get_account(1))
+
+    def test_sync_failure_records_time_and_success_clears_it(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("example")
+            db.mark_sync_started(account["id"])
+            db.mark_sync_failed(account["id"], "X request timed out")
+            failed = db.get_account(account["id"])
+            self.assertEqual(failed["last_error"], "X request timed out")
+            self.assertIsNotNone(failed["last_sync_failed_at"])
+            db.mark_sync_started(account["id"])
+            db.mark_sync_succeeded(account["id"], None)
+            recovered = db.get_account(account["id"])
+            self.assertIsNone(recovered["last_error"])
+            self.assertIsNone(recovered["last_sync_failed_at"])
 
     def test_tweets_can_be_filtered_by_year_and_month(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -415,6 +431,11 @@ class FakeScraper:
         }
 
 
+class FailingScraper:
+    async def fetch_latest(self, **kwargs):
+        raise RuntimeError("Could not find user")
+
+
 class FakeMedia:
     async def download_profile_assets(self, *args, **kwargs):
         return None, None
@@ -449,12 +470,28 @@ class SyncTests(unittest.TestCase):
             first = asyncio.run(service.sync_account(account["id"]))
             second = asyncio.run(service.sync_account(account["id"]))
             self.assertEqual(first["inserted"], 1)
+            self.assertEqual(first["username"], "example")
             self.assertEqual(second["inserted"], 1)
             self.assertEqual(scraper.seen_cursors, [None, "100"])
             self.assertEqual(db.get_account(account["id"])["last_tweet_id"], "101")
             self.assertNotIn("notification", first)
             self.assertTrue(second["notification"]["sent"])
             self.assertEqual(len(notifier.calls), 1)
+
+    def test_sync_all_failure_identifies_account_and_reason(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = Database(root / "reader.db")
+            account = db.create_account("missing_user")
+            service = SyncService(db, ConfigStore(root), FailingScraper(), FakeMedia())
+            result = asyncio.run(service.sync_all())
+            self.assertEqual(result["failed"], 1)
+            self.assertEqual(result["results"][0]["accountId"], account["id"])
+            self.assertEqual(result["results"][0]["username"], "missing_user")
+            self.assertEqual(result["results"][0]["error"], "Could not find user")
+            failed = db.get_account(account["id"])
+            self.assertEqual(failed["last_error"], "Could not find user")
+            self.assertIsNotNone(failed["last_sync_failed_at"])
 
 
 if __name__ == "__main__":

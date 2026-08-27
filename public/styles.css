@@ -217,9 +217,14 @@ body.lightbox-open { overflow: hidden; }
 .home-orbit::before, .home-orbit::after, .orbit-dot { display: none; }
 .home-orbit img { width: 64px; height: 64px; border-radius: 17px; }
 .home-directory { margin: 0; }
-.home-directory > header { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 16px; margin: 0; padding: 0 18px; border-bottom: 1px solid var(--line); }
+.home-directory > header { min-height: 88px; display: flex; align-items: center; justify-content: space-between; gap: 24px; margin: 0; padding: 14px 18px; border-bottom: 1px solid var(--line); }
 .home-directory h2 { margin: 2px 0 0; font-size: 20px; font-weight: 800; }
-.home-directory > header > span { color: var(--muted); font-size: var(--text-caption); }
+.home-directory-heading { min-width: 0; }
+.home-refresh-time { display: block; margin-top: 6px; color: var(--muted); font-size: var(--text-caption); }
+.home-layout-toggle { display: inline-grid; grid-template-columns: repeat(2, 1fr); padding: 2px; border: 1px solid var(--line-strong); border-radius: 10px; background: var(--wash); }
+.home-layout-toggle button { min-width: 58px; min-height: 34px; padding: 0 11px; border: 0; border-radius: 7px; color: var(--muted); background: transparent; font-size: var(--text-small); font-weight: 750; cursor: pointer; }
+.home-layout-toggle button:hover { color: var(--ink); }
+.home-layout-toggle button[aria-pressed="true"] { color: #fff; background: var(--ink); box-shadow: 0 1px 3px rgba(15,20,25,.16); }
 .home-account-grid { display: block; }
 .home-account-card { min-width: 0; overflow: hidden; position: relative; border-bottom: 1px solid var(--line); background: #fff; transition: background .15s ease; }
 .home-account-card:hover { background: rgba(0,0,0,.015); }
@@ -238,6 +243,24 @@ body.lightbox-open { overflow: hidden; }
 .home-card-updated { margin-top: 12px; color: var(--muted); font-size: var(--text-small); }
 .home-card-actions { display: flex; gap: 8px; margin-top: 15px; }
 .home-card-actions .button-link { padding: 0 15px; font-size: var(--text-ui); }
+.home-action-compact { display: none; }
+.home-compact-layout .home-topbar, .home-compact-layout .home-main, .home-compact-layout .home-footer { width: min(100%, 1180px); }
+.home-account-grid[data-layout="compact"] { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; padding: 12px; background: var(--wash); }
+.home-account-grid[data-layout="compact"] .home-account-card { min-height: 188px; display: flex; align-items: center; flex-direction: column; padding: 14px 10px 10px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+.home-account-grid[data-layout="compact"] .home-account-card:hover { border-color: var(--line-strong); background: #fff; box-shadow: 0 5px 18px rgba(15,20,25,.07); }
+.home-account-grid[data-layout="compact"] .home-card-cover { display: none; }
+.home-account-grid[data-layout="compact"] .home-card-avatar { width: 54px; height: 54px; flex: 0 0 auto; position: static; margin: 0 0 8px; border: 0; font-size: 19px; }
+.home-account-grid[data-layout="compact"] .home-card-body { width: 100%; display: flex; align-items: center; flex: 1; flex-direction: column; padding: 0; text-align: center; }
+.home-account-grid[data-layout="compact"] .home-card-body h3 { width: 100%; font-size: 16px; line-height: 1.3; }
+.home-account-grid[data-layout="compact"] .home-private-badge { order: -1; margin: 0 0 5px; padding: 2px 6px; font-size: 10px; }
+.home-account-grid[data-layout="compact"] .home-card-handle { width: 100%; overflow: hidden; margin-top: 2px; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.home-account-grid[data-layout="compact"] .home-card-body > p,
+.home-account-grid[data-layout="compact"] .home-card-meta,
+.home-account-grid[data-layout="compact"] .home-card-updated { display: none; }
+.home-account-grid[data-layout="compact"] .home-card-actions { width: 100%; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin-top: auto; padding-top: 11px; }
+.home-account-grid[data-layout="compact"] .home-card-actions .button-link { min-width: 0; min-height: 38px; padding: 0 4px; font-size: 12px; white-space: nowrap; }
+.home-account-grid[data-layout="compact"] .home-action-wide { display: none; }
+.home-account-grid[data-layout="compact"] .home-action-compact { display: inline; }
 .home-empty { min-height: 260px; display: grid; place-items: center; align-content: center; gap: 7px; padding: 30px; color: var(--muted); text-align: center; }
 .home-empty strong { color: var(--ink); font-size: 22px; }
 .home-empty span { font-size: var(--text-ui); }
@@ -288,6 +311,22 @@ body.lightbox-open { overflow: hidden; }
 .admin-stat-grid span { color: var(--muted); font-size: var(--text-small); font-weight: 650; }
 .admin-stat-grid strong { margin: 7px 0 4px; font-size: 24px; font-weight: 800; }
 .admin-stat-grid small { color: var(--soft); font-size: var(--text-caption); }
+.sync-failure-panel { margin-bottom: 18px; padding: 18px; border: 1px solid #ffc1c6; border-radius: 16px; background: var(--danger-soft); }
+.sync-failure-panel[hidden] { display: none; }
+.sync-failure-panel > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; margin-bottom: 13px; }
+.sync-failure-panel h2 { margin: 3px 0 4px; color: var(--danger); font-size: 21px; }
+.sync-failure-panel header p { margin: 0; color: #7d3038; font-size: var(--text-small); line-height: 1.55; }
+.sync-failure-count { flex-shrink: 0; padding: 6px 10px; border-radius: 999px; color: var(--danger); background: #fff; font-size: var(--text-caption); font-weight: 750; }
+.sync-failure-list { display: grid; gap: 8px; }
+.sync-failure-item { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid rgba(211,45,58,.2); border-radius: 12px; background: rgba(255,255,255,.86); }
+.sync-failure-marker { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--danger); font-size: 20px; font-weight: 850; }
+.sync-failure-copy { min-width: 0; }
+.sync-failure-copy strong, .sync-failure-copy p, .sync-failure-copy code, .sync-failure-copy small { display: block; }
+.sync-failure-copy strong { font-size: var(--text-ui); }
+.sync-failure-copy p { margin: 3px 0 0; color: var(--danger); font-size: var(--text-small); font-weight: 700; line-height: 1.45; }
+.sync-failure-copy code { max-width: 100%; overflow-wrap: anywhere; margin-top: 5px; color: #7d3038; background: transparent; font-size: var(--text-caption); line-height: 1.45; white-space: normal; }
+.sync-failure-copy small { margin-top: 5px; color: var(--muted); font-size: var(--text-caption); }
+.sync-failure-retry { min-height: 38px; white-space: nowrap; }
 .admin-layout { display: grid; grid-template-columns: minmax(0, 1.75fr) minmax(310px, .75fr); gap: 18px; align-items: start; }
 .admin-primary-column { display: grid; gap: 18px; }
 .admin-panel { padding: 22px; border: 1px solid var(--line-strong); border-radius: 16px; background: #fff; }
@@ -326,6 +365,7 @@ body.lightbox-open { overflow: hidden; }
 .align-end { justify-content: flex-end; }
 .admin-account-list { display: grid; gap: 8px; }
 .admin-account-card { display: grid; grid-template-columns: 46px minmax(230px, 1fr) auto auto; align-items: center; gap: 13px; padding: 13px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+.admin-account-card.has-sync-error { border-color: #ffc1c6; background: #fffafb; }
 .admin-account-card.private-account { border-style: dashed; background: var(--wash); }
 .admin-account-avatar { width: 46px; height: 46px; display: grid; place-items: center; overflow: hidden; border-radius: 50%; color: var(--ink); background: var(--line-strong); font-weight: 800; }
 .admin-account-avatar img { width: 100%; height: 100%; object-fit: cover; }
@@ -334,7 +374,7 @@ body.lightbox-open { overflow: hidden; }
 .admin-account-copy strong { font-size: var(--text-ui); }
 .admin-account-copy small { margin-top: 3px; color: var(--muted); font-size: var(--text-caption); }
 .admin-account-copy > span { margin-top: 3px; color: var(--soft); font-size: var(--text-caption); }
-.admin-account-copy .account-error { color: var(--danger); }
+.admin-account-copy .account-error { overflow: visible; color: var(--danger); line-height: 1.45; text-overflow: clip; white-space: normal; }
 .account-option-checks { display: flex; gap: 10px; color: var(--muted); font-size: var(--text-caption); }
 .account-option-checks label { white-space: nowrap; }
 .account-option-checks .public-option { color: var(--ink); font-weight: 700; }
@@ -387,6 +427,18 @@ body.lightbox-open { overflow: hidden; }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 50% { opacity: .45; } }
 
+@media (min-width: 640px) {
+  .home-account-grid[data-layout="compact"] { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (min-width: 960px) {
+  .home-account-grid[data-layout="compact"] { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; padding: 16px; }
+}
+
+@media (min-width: 1180px) {
+  .home-account-grid[data-layout="compact"] { grid-template-columns: repeat(5, minmax(0, 1fr)); }
+}
+
 @media (max-width: 1100px) {
   .admin-stat-grid { grid-template-columns: repeat(2, 1fr); }
   .admin-layout { grid-template-columns: 1fr; }
@@ -417,6 +469,11 @@ body.lightbox-open { overflow: hidden; }
   .admin-panel-heading .switch { flex-shrink: 0; padding-top: 4px; }
   .admin-page-heading > button { width: 100%; margin-top: 17px; }
   .admin-panel { padding: 18px; }
+  .sync-failure-panel { padding: 15px; }
+  .sync-failure-panel > header { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .sync-failure-item { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px; }
+  .sync-failure-marker { width: 32px; height: 32px; }
+  .sync-failure-retry { width: 100%; grid-column: 2; }
   .admin-add-account { width: 100%; margin-top: 15px; }
   .admin-add-member { width: 100%; grid-template-columns: 1fr; margin-top: 15px; }
   .credential-form-row { grid-template-columns: 1fr; }
@@ -470,6 +527,7 @@ body.lightbox-open { overflow: hidden; }
   .home-hero h1 { font-size: clamp(27px, 8vw, 30px); }
   .home-orbit, .home-orbit img { width: 52px; height: 52px; }
   .home-directory > header { padding: 0 15px; }
+  .home-refresh-time { display: none; }
   .home-card-body { padding-right: 15px; padding-left: 15px; }
   .home-card-avatar { left: 15px; }
   .home-card-actions { display: grid; grid-template-columns: 1fr 1fr; }

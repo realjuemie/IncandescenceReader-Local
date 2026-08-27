@@ -7,7 +7,7 @@
   <title>Incandescence · 管理后台</title>
   <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
   <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=4.7.0">
+  <link rel="stylesheet" href="/styles.css?v=4.8.1">
 </head>
 <body class="admin-body">
   <main class="admin-auth-view" id="auth-view">
@@ -60,6 +60,18 @@
         <article><span>有效抓取凭证</span><strong id="stat-sessions">—</strong><small id="stat-scraper-version">免费组件</small></article>
         <article><span>自动更新</span><strong id="stat-schedule">—</strong><small id="stat-next-run">等待状态</small></article>
         <article><span>当前任务</span><strong id="stat-sync">—</strong><small id="stat-last-result">无任务</small></article>
+      </section>
+
+      <section class="sync-failure-panel" id="sync-failure-panel" aria-live="polite" hidden>
+        <header>
+          <div>
+            <div class="eyebrow">SYNC ISSUES</div>
+            <h2>抓取异常</h2>
+            <p>以下账号最近一次更新失败。这里会保留具体原因，更新成功后自动移除。</p>
+          </div>
+          <span class="sync-failure-count" id="sync-failure-count"></span>
+        </header>
+        <div class="sync-failure-list" id="sync-failure-list"></div>
       </section>
 
       <div class="admin-layout">
@@ -211,6 +223,6 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin.js?v=4.6.0" defer></script>
+  <script src="/admin.js?v=4.8.1" defer></script>
 </body>
 </html>

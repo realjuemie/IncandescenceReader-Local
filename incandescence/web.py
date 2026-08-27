@@ -84,6 +84,7 @@ class Application:
                     "includeReposts": bool(account.get("include_reposts")),
                     "lastTweetId": account.get("last_tweet_id"),
                     "lastError": account.get("last_error"),
+                    "lastFailedAt": account.get("last_sync_failed_at"),
                     "syncing": bool(account.get("syncing")),
                     "pendingMediaCount": account.get("pending_media_count", 0),
                 }

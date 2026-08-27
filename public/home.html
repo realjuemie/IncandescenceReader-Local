@@ -7,7 +7,7 @@
   <title>Incandescence · 账号导航</title>
   <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
   <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=4.7.0">
+  <link rel="stylesheet" href="/styles.css?v=4.8.1">
 </head>
 <body class="home-body">
   <header class="home-topbar">
@@ -33,11 +33,15 @@
 
     <section class="home-directory">
       <header>
-        <div>
+        <div class="home-directory-heading">
           <div class="eyebrow">ACCOUNT DIRECTORY</div>
           <h2>账号导航</h2>
+          <span class="home-refresh-time" id="home-refresh-time"></span>
         </div>
-        <span id="home-refresh-time"></span>
+        <div class="home-layout-toggle" role="group" aria-label="账号显示方式">
+          <button type="button" data-home-layout="banner" aria-pressed="true" title="切换为横幅显示">横幅</button>
+          <button type="button" data-home-layout="compact" aria-pressed="false" title="切换为小组件显示">组件</button>
+        </div>
       </header>
       <div class="home-account-grid" id="home-account-grid" aria-live="polite"></div>
     </section>
@@ -48,6 +52,6 @@
   </footer>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/home.js?v=4.6.0" defer></script>
+  <script src="/home.js?v=4.8.1" defer></script>
 </body>
 </html>

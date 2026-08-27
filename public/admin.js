@@ -53,6 +53,7 @@ function bindEvents() {
   $("#session-list").addEventListener("click", handleSessionAction);
   $("#add-account-form").addEventListener("submit", addAccount);
   $("#admin-account-list").addEventListener("click", handleAccountAction);
+  $("#sync-failure-list").addEventListener("click", handleAccountAction);
   $("#add-member-form").addEventListener("submit", addMember);
   $("#admin-member-list").addEventListener("click", handleMemberAction);
   $("#save-settings").addEventListener("click", saveSettings);
@@ -134,10 +135,69 @@ async function loadDashboard() {
 
 function renderDashboard() {
   renderStats();
+  renderSyncFailures();
   renderSessions();
   renderAccounts();
   renderMembers();
   fillSettings();
+}
+
+function describeSyncError(value) {
+  const detail = String(value || "同步失败").trim() || "同步失败";
+  let summary = detail;
+  if (/rate.?limit|too many requests|\b429\b/i.test(detail)) {
+    summary = "X 请求频率受限，请稍后再试";
+  } else if (/timeout|timed out/i.test(detail)) {
+    summary = "连接 X 超时，请检查网络或代理";
+  } else if (/no active accounts|cookie|unauthori[sz]ed|forbidden|\b401\b|\b403\b/i.test(detail)) {
+    summary = "抓取凭证不可用或已经失效";
+  } else if (/not found|does not exist|could not find user/i.test(detail)) {
+    summary = "X 账号不存在、已改名或暂时无法找到";
+  } else if (/protected|private account/i.test(detail)) {
+    summary = "该账号受保护，当前凭证无权读取";
+  } else if (/proxy|connection refused|connection reset|network|dns/i.test(detail)) {
+    summary = "网络或代理连接失败";
+  }
+  return { summary, detail: summary === detail ? "" : detail };
+}
+
+function renderSyncFailures() {
+  const panel = $("#sync-failure-panel");
+  const list = $("#sync-failure-list");
+  const failures = state.accounts.filter((account) => account.lastError);
+  panel.hidden = failures.length === 0;
+  list.replaceChildren();
+  if (!failures.length) return;
+  $("#sync-failure-count").textContent = `${failures.length} 个账号需要处理`;
+  for (const account of failures) {
+    const item = document.createElement("article");
+    item.className = "sync-failure-item";
+    const marker = document.createElement("div");
+    marker.className = "sync-failure-marker";
+    marker.textContent = "!";
+    const copy = document.createElement("div");
+    copy.className = "sync-failure-copy";
+    const title = document.createElement("strong");
+    title.textContent = `${account.displayName}  @${account.username}`;
+    const issue = describeSyncError(account.lastError);
+    const reason = document.createElement("p");
+    reason.textContent = issue.summary;
+    const time = document.createElement("small");
+    time.textContent = account.lastFailedAt
+      ? `失败于 ${relativeTime(account.lastFailedAt)} · ${new Date(account.lastFailedAt).toLocaleString("zh-CN")}`
+      : "失败时间未知";
+    copy.append(title, reason);
+    if (issue.detail) {
+      const technical = document.createElement("code");
+      technical.textContent = `技术信息：${issue.detail}`;
+      copy.append(technical);
+    }
+    copy.append(time);
+    const retry = actionButton("重新更新", "sync-account", account.id);
+    retry.className = "secondary-button sync-failure-retry";
+    item.append(marker, copy, retry);
+    list.append(item);
+  }
 }
 
 function renderStats() {
@@ -308,7 +368,7 @@ function renderAccounts() {
   }
   for (const account of state.accounts) {
     const card = document.createElement("article");
-    card.className = `admin-account-card${account.isPublic ? "" : " private-account"}`;
+    card.className = `admin-account-card${account.isPublic ? "" : " private-account"}${account.lastError ? " has-sync-error" : ""}`;
     const avatar = document.createElement("div");
     avatar.className = "admin-account-avatar";
     if (account.avatarUrl) {
@@ -325,7 +385,12 @@ function renderAccounts() {
     meta.textContent = `${account.tweetCount || 0} 条内容 · ${account.mediaCount || 0} 个媒体 · ${account.lastSyncedAt ? `更新于 ${relativeTime(account.lastSyncedAt)}` : "尚未更新"}`;
     const error = document.createElement("span");
     error.className = account.lastError ? "account-error" : "account-cursor";
-    error.textContent = account.lastError || (account.lastTweetId ? `增量游标 ${account.lastTweetId}` : "首次更新会读取最近内容");
+    if (account.lastError) {
+      error.textContent = `抓取失败：${describeSyncError(account.lastError).summary}`;
+      error.title = account.lastError;
+    } else {
+      error.textContent = account.lastTweetId ? `增量游标 ${account.lastTweetId}` : "首次更新会读取最近内容";
+    }
     copy.append(title, meta, error);
     const options = document.createElement("div");
     options.className = "account-option-checks";
@@ -524,9 +589,10 @@ async function handleAccountAction(event) {
   const id = Number(button.dataset.id);
   const account = state.accounts.find((item) => item.id === id);
   if (!account) return;
+  const action = button.dataset.accountAction;
   button.disabled = true;
   try {
-    if (button.dataset.accountAction === "sync-account") {
+    if (action === "sync-account") {
       const result = await api(`/api/admin/accounts/${id}/sync`, { method: "POST", body: {} });
       const notice = result.notification?.sent === false
         ? `；Bark 失败：${result.notification.error}`
@@ -535,7 +601,7 @@ async function handleAccountAction(event) {
         `@${account.username} 更新完成：新增 ${result.inserted} 条，媒体 ${result.mediaDownloaded} 个${notice}`,
         Boolean(notice),
       );
-    } else if (button.dataset.accountAction === "save-account") {
+    } else if (action === "save-account") {
       const card = button.closest(".admin-account-card");
       await api(`/api/admin/accounts/${id}`, {
         method: "PATCH",
@@ -554,7 +620,10 @@ async function handleAccountAction(event) {
     }
     await reloadAccounts();
   } catch (error) {
-    showToast(error.message, true);
+    const message = action === "sync-account"
+      ? `@${account.username} 更新失败：${describeSyncError(error.message).summary}`
+      : error.message;
+    showToast(message, true);
     await reloadAccounts().catch(() => {});
   } finally { button.disabled = false; }
 }
@@ -563,6 +632,7 @@ async function reloadAccounts() {
   const response = await api("/api/admin/accounts");
   state.accounts = response.items;
   renderAccounts();
+  renderSyncFailures();
   renderMembers();
   renderStats();
 }
@@ -738,11 +808,15 @@ async function syncAll() {
       (item) => item.notification?.sent === false,
     ).length;
     const notice = notificationFailures ? `，Bark 失败 ${notificationFailures}` : "";
+    const failures = result.results.filter((item) => item.error);
+    const failedAccounts = failures.map((item) => `@${item.username || item.accountId}`).join("、");
+    await loadDashboard();
     showToast(
-      `更新完成：成功 ${result.succeeded}，失败 ${result.failed}${notice}`,
+      failures.length
+        ? `更新完成：成功 ${result.succeeded}，失败 ${result.failed}（${failedAccounts}）；详情已列在页面顶部${notice}`
+        : `更新完成：成功 ${result.succeeded}，失败 ${result.failed}${notice}`,
       result.failed > 0 || notificationFailures > 0,
     );
-    await loadDashboard();
   } catch (error) { showToast(error.message, true); }
   finally { button.disabled = false; }
 }
@@ -761,6 +835,7 @@ async function refreshStatus() {
     state.sessions = sessions.items;
     state.members = members.items;
     renderStats();
+    renderSyncFailures();
     renderAccounts();
     renderSessions();
     renderMembers();

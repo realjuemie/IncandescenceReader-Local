@@ -66,6 +66,7 @@ class Database:
                     last_tweet_id TEXT,
                     last_synced_at TEXT,
                     last_sync_started_at TEXT,
+                    last_sync_failed_at TEXT,
                     last_error TEXT,
                     syncing INTEGER NOT NULL DEFAULT 0,
                     created_at TEXT NOT NULL,
@@ -151,6 +152,8 @@ class Database:
                 db.execute(
                     "ALTER TABLE accounts ADD COLUMN is_public INTEGER NOT NULL DEFAULT 1"
                 )
+            if "last_sync_failed_at" not in account_columns:
+                db.execute("ALTER TABLE accounts ADD COLUMN last_sync_failed_at TEXT")
             tweet_columns = {
                 row["name"] for row in db.execute("PRAGMA table_info(tweets)").fetchall()
             }
@@ -301,18 +304,21 @@ class Database:
         with self.connection() as db:
             db.execute(
                 """UPDATE accounts SET syncing = 0, last_tweet_id = COALESCE(?, last_tweet_id),
-                   last_synced_at = ?, last_error = NULL, updated_at = ? WHERE id = ?""",
+                   last_synced_at = ?, last_sync_failed_at = NULL,
+                   last_error = NULL, updated_at = ? WHERE id = ?""",
                 (newest_id, now, now, account_id),
             )
             db.commit()
 
     def mark_sync_failed(self, account_id: int, error: str) -> None:
         message = (error or "同步失败")[:1000]
+        now = utc_now()
         with self.connection() as db:
             db.execute(
-                """UPDATE accounts SET syncing = 0, last_error = ?, updated_at = ?
+                """UPDATE accounts SET syncing = 0, last_error = ?,
+                   last_sync_failed_at = ?, updated_at = ?
                    WHERE id = ?""",
-                (message, utc_now(), account_id),
+                (message, now, now, account_id),
             )
             db.commit()
 

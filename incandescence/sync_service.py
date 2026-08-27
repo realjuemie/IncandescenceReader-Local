@@ -92,6 +92,8 @@ class SyncService:
             self.database.mark_sync_succeeded(account_id, result.get("newestSeenId"))
             response = {
                 "accountId": account_id,
+                "username": account["username"],
+                "displayName": account.get("display_name") or account["username"],
                 "reason": reason,
                 "fetched": len(result["tweets"]),
                 "inserted": inserted,
@@ -165,11 +167,23 @@ class SyncService:
                 results.append(await self.sync_account(account["id"], reason=reason))
             except SyncBusyError:
                 results.append(
-                    {"accountId": account["id"], "error": "已有同步任务正在运行"}
+                    {
+                        "accountId": account["id"],
+                        "username": account["username"],
+                        "displayName": account.get("display_name") or account["username"],
+                        "error": "已有同步任务正在运行",
+                    }
                 )
                 break
             except Exception as error:
-                results.append({"accountId": account["id"], "error": str(error)})
+                results.append(
+                    {
+                        "accountId": account["id"],
+                        "username": account["username"],
+                        "displayName": account.get("display_name") or account["username"],
+                        "error": str(error),
+                    }
+                )
         return {
             "results": results,
             "succeeded": sum(1 for item in results if "error" not in item),
