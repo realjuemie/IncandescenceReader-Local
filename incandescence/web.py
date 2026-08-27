@@ -123,6 +123,12 @@ class RequestHandler(BaseHTTPRequestHandler):
                 member = self._member()
                 self._json({"authenticated": member is not None, "member": member})
                 return
+            if path == "/api/member/notifications":
+                member = self._require_member()
+                self._json(
+                    self.app.member_auth.notification_settings(int(member["id"]))
+                )
+                return
             if path == "/api/public/accounts":
                 is_admin = self._admin_authenticated()
                 member = None if is_admin else self._member()
@@ -241,6 +247,30 @@ class RequestHandler(BaseHTTPRequestHandler):
                     headers={"Set-Cookie": self.app.member_auth.clear_cookie()},
                 )
                 return
+            if path == "/api/member/notifications/test":
+                member = self._require_member()
+                settings = self.app.database.get_member_notification_settings(
+                    int(member["id"])
+                )
+                if not settings["device_key"]:
+                    raise ValueError("请先填写并保存 Bark Device Key")
+                accounts = self.app.database.list_accounts(member_id=int(member["id"]))
+                icon_url = (
+                    str(accounts[0].get("profile_image_url") or "") if accounts else ""
+                )
+                result = asyncio.run(
+                    self.app.notifier.test_settings(
+                        {
+                            "barkServerUrl": settings["server_url"],
+                            "barkDeviceKey": settings["device_key"],
+                            "barkGroup": settings["group"],
+                            "siteBaseUrl": self.app.config.get().get("siteBaseUrl") or "",
+                        },
+                        icon_url=icon_url or None,
+                    )
+                )
+                self._json(result)
+                return
             if path == "/api/admin/setup":
                 token = self.app.admin_auth.setup(str(body.get("password") or ""))
                 self._json(
@@ -338,6 +368,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlsplit(self.path).path
             body = self._read_json()
+            if path == "/api/member/notifications":
+                member = self._require_member()
+                settings = self.app.member_auth.update_notification_settings(
+                    int(member["id"]),
+                    enabled=bool(body.get("enabled", False)),
+                    server_url=body.get("serverUrl"),
+                    device_key=body.get("deviceKey") if "deviceKey" in body else None,
+                    clear_device_key=bool(body.get("clearDeviceKey", False)),
+                    group=body.get("group"),
+                    account_ids=body.get("accountIds", []),
+                )
+                self._json(settings)
+                return
             if path.startswith("/api/admin/"):
                 self._require_admin()
             if path == "/api/admin/settings":
@@ -433,6 +476,12 @@ class RequestHandler(BaseHTTPRequestHandler):
 
     def _member(self) -> dict[str, Any] | None:
         return self.app.member_auth.current(self.headers.get("Cookie"))
+
+    def _require_member(self) -> dict[str, Any]:
+        member = self._member()
+        if not member:
+            raise MemberAuthenticationRequired("需要会员登录")
+        return member
 
     def _admin_settings(
         self, settings: dict[str, Any] | None = None
@@ -581,7 +630,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_error(self, error: Exception) -> None:
         if isinstance(error, KeyError):
             self._error(HTTPStatus.NOT_FOUND, str(error).strip("'"))
-        elif isinstance(error, AdminAuthenticationRequired):
+        elif isinstance(error, (AdminAuthenticationRequired, MemberAuthenticationRequired)):
             self._error(HTTPStatus.UNAUTHORIZED, str(error))
         elif isinstance(error, (ValueError, FileNotFoundError)):
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -613,4 +662,8 @@ def _first(query: dict[str, list[str]], key: str, default: Any = None) -> Any:
 
 
 class AdminAuthenticationRequired(RuntimeError):
+    pass
+
+
+class MemberAuthenticationRequired(RuntimeError):
     pass

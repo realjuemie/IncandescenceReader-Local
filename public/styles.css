@@ -172,6 +172,12 @@ code { padding: 2px 5px; border-radius: 4px; background: var(--hover); font: var
 .media-item img { width: 100%; height: 100%; min-height: 190px; max-height: 520px; display: block; object-fit: cover; background: #000; }
 .media-grid.count-1 .media-item img { object-fit: contain; }
 .media-video-shell { width: 100%; min-height: 190px; display: block; overflow: hidden; contain: layout paint; background: #000; }
+.media-video-shell > .video-launch { display: flex; align-items: center; justify-content: center; gap: 9px; position: absolute; inset: 0; z-index: 2; border: 0; color: #fff; background: linear-gradient(180deg, rgba(0,0,0,.08), rgba(0,0,0,.42)); cursor: pointer; font-size: var(--text-ui); font-weight: 750; }
+.media-video-shell > .video-launch:hover { background: linear-gradient(180deg, rgba(0,0,0,.03), rgba(0,0,0,.34)); }
+.media-video-shell > .video-launch:focus-visible { outline: 3px solid var(--blue); outline-offset: -3px; }
+.video-launch-icon { width: 52px; height: 52px; display: grid; place-items: center; padding-left: 3px; border: 2px solid rgba(255,255,255,.9); border-radius: 50%; background: rgba(15,20,25,.72); box-shadow: 0 6px 24px rgba(0,0,0,.28); font-size: 20px; }
+.video-launch-text { padding: 7px 10px; border-radius: 999px; background: rgba(15,20,25,.72); }
+.media-video-shell.media-video-started > .video-launch, .media-video-shell.media-video-error > .video-launch { display: none; }
 .media-error { min-height: 110px; display: grid; place-items: center; padding: 15px; color: var(--muted); font-size: var(--text-ui); text-align: center; }
 .quote-card { margin: 10px 0; padding: 12px 14px; border: 1px solid var(--line-strong); border-radius: 16px; color: var(--ink); font-size: var(--text-ui); line-height: 1.55; }
 .quote-card p { margin: 5px 0 0; white-space: pre-wrap; }
@@ -205,8 +211,34 @@ body.lightbox-open { overflow: hidden; }
 .admin-brand > span:last-child small { margin-top: 1px; color: var(--muted); font-size: var(--text-caption); }
 .site-logo { width: 38px; height: 38px; border-radius: 11px; }
 .public-member-status { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: var(--text-caption); }
+.public-member-status > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .public-member-status a, .member-status-action { min-height: 34px; display: inline-flex; align-items: center; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 999px; color: var(--ink); background: #fff; font-size: var(--text-caption); font-weight: 750; text-decoration: none; cursor: pointer; }
 .public-member-status a:hover, .member-status-action:hover { background: var(--hover); }
+
+/* Per-member Bark notification dialog */
+.member-notification-dialog { width: min(620px, calc(100vw - 28px)); max-height: min(760px, calc(100dvh - 28px)); padding: 0; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 18px; color: var(--ink); background: #fff; box-shadow: 0 24px 80px rgba(15,20,25,.24); }
+.member-notification-dialog::backdrop { background: rgba(15,20,25,.48); backdrop-filter: blur(3px); }
+.member-notification-card { max-height: min(760px, calc(100dvh - 28px)); overflow-y: auto; padding: 24px; }
+.member-notification-card > header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; }
+.member-notification-card h2 { margin: 4px 0 0; font-size: 24px; }
+.member-notification-close { width: 38px; height: 38px; flex-shrink: 0; border: 0; border-radius: 50%; background: var(--wash); font-size: 25px; line-height: 1; cursor: pointer; }
+.member-notification-close:hover { background: var(--hover); }
+.member-notification-intro { margin: 12px 0 16px; color: var(--muted); font-size: var(--text-small); line-height: 1.6; }
+.member-notification-toggle { display: flex; align-items: center; gap: 7px; padding: 11px 12px; border-radius: 10px; background: var(--blue-soft); font-size: var(--text-ui); font-weight: 750; }
+.member-notification-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 15px; }
+.member-notification-fields label { color: var(--ink); font-size: var(--text-small); font-weight: 700; }
+.member-notification-fields label:first-child { grid-column: 1 / -1; }
+.member-notification-fields input { width: 100%; height: 42px; margin-top: 6px; padding: 0 11px; border: 1px solid var(--line-strong); border-radius: 8px; outline: 0; }
+.member-notification-fields input:focus { border-color: var(--blue); box-shadow: 0 0 0 1px var(--blue); }
+.member-notification-accounts { margin: 16px 0 0; padding: 13px; border: 1px solid var(--line); border-radius: 11px; }
+.member-notification-accounts legend { padding: 0 5px; font-size: var(--text-small); font-weight: 750; }
+#member-bark-accounts { max-height: 190px; display: grid; gap: 7px; overflow-y: auto; }
+#member-bark-accounts label { min-height: 38px; display: flex; align-items: center; padding: 7px 9px; border: 1px solid var(--line); border-radius: 9px; color: var(--muted); background: var(--wash); font-size: var(--text-small); cursor: pointer; }
+#member-bark-accounts label:has(input:checked) { border-color: #9dd4f6; color: var(--blue-dark); background: var(--blue-soft); }
+#member-bark-accounts p { margin: 5px; color: var(--muted); font-size: var(--text-small); }
+.member-notification-result { min-height: 22px; margin-top: 11px; color: var(--muted); font-size: var(--text-small); }
+.member-notification-result.bad { color: var(--danger); }
+.member-notification-card > footer { display: grid; grid-template-columns: auto 1fr auto auto; align-items: center; gap: 8px; margin-top: 12px; }
 .home-main { width: min(100%, 660px); min-height: calc(100vh - 58px); margin: 0 auto; border-right: 1px solid var(--line); border-left: 1px solid var(--line); }
 .home-hero { min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 24px; padding: 30px 28px; border-bottom: 1px solid var(--line); color: var(--ink); background: #fff; }
 .home-hero::before { display: none; }
@@ -381,6 +413,7 @@ body.lightbox-open { overflow: hidden; }
 .account-option-checks .public-option { color: var(--ink); font-weight: 700; }
 .admin-member-list { display: grid; gap: 10px; }
 .admin-member-card { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
+.admin-member-card.has-unsaved { border-color: #9dd4f6; box-shadow: inset 3px 0 0 var(--blue); }
 .admin-member-card.inactive { border-style: dashed; background: var(--wash); opacity: .78; }
 .admin-member-heading { display: flex; align-items: center; justify-content: space-between; gap: 15px; }
 .admin-member-heading strong, .admin-member-heading small { display: block; }
@@ -511,6 +544,14 @@ body.lightbox-open { overflow: hidden; }
 @media (max-width: 600px) {
   input, select, textarea { font-size: 16px !important; }
   .primary-button, .secondary-button, .danger-button { min-height: 44px; }
+  .member-notification-card { padding: 19px 16px max(18px, env(safe-area-inset-bottom)); }
+  .member-notification-card h2 { font-size: 22px; }
+  .member-notification-fields { grid-template-columns: 1fr; }
+  .member-notification-fields label:first-child { grid-column: auto; }
+  .member-notification-card > footer { grid-template-columns: 1fr 1fr; }
+  .member-notification-card > footer > span { display: none; }
+  .member-notification-card > footer #member-bark-clear { grid-column: 1 / -1; justify-self: start; }
+  #member-bark-accounts { max-height: 170px; }
   .main-column { border-right: 0; border-left: 0; }
   .banner-wrap { height: 94px; }
   .profile-content { display: block; padding: 0 14px 18px; }
@@ -575,6 +616,7 @@ body.lightbox-open { overflow: hidden; }
 }
 
 @media (max-width: 470px) {
+  .public-member-status > span { display: none; }
   .admin-auth-view { padding: 14px; }
   .admin-auth-card { padding: 28px 22px; }
   .admin-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }

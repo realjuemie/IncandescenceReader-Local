@@ -26,10 +26,15 @@ class BarkNotifier:
 
     async def test(self, *, icon_url: str | None = None) -> dict[str, Any]:
         settings = self.config.get()
+        return await self.test_settings(settings, icon_url=icon_url)
+
+    async def test_settings(
+        self, settings: dict[str, Any], *, icon_url: str | None = None
+    ) -> dict[str, Any]:
         return await self._send(
             settings,
             title="Incandescence · Bark 测试成功",
-            body="通知渠道已连接。后续抓取到新内容或 X 登录凭证失效时会在这里提醒。",
+            body="通知渠道已连接。后续选中的账号出现新内容时会在这里提醒。",
             icon_url=icon_url,
             target_url=settings.get("siteBaseUrl") or None,
         )
@@ -41,8 +46,9 @@ class BarkNotifier:
         profile: dict[str, Any],
         tweets: list[dict[str, Any]],
         inserted: int,
+        settings: dict[str, Any] | None = None,
     ) -> dict[str, Any] | None:
-        settings = self.config.get()
+        settings = settings or self.config.get()
         if not settings["barkEnabled"] or inserted <= 0:
             return None
         username = str(profile.get("username") or "unknown").lstrip("@")

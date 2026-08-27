@@ -81,7 +81,8 @@ function renderMemberStatus(status) {
       await api("/api/member/logout", { method: "POST", body: {} });
       await loadDirectory();
     });
-    container.append(name, logout);
+    const notifications = window.MemberNotifications.createButton(api, showToast);
+    container.append(name, notifications, logout);
   } else {
     const login = document.createElement("a");
     login.href = "/login?redirect=%2F";

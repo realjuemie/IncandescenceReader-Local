@@ -11,6 +11,7 @@ const state = {
   toastTimer: null,
   inspectTimer: null,
   pollingStarted: false,
+  memberDrafts: new Map(),
 };
 
 async function api(path, options = {}) {
@@ -56,6 +57,7 @@ function bindEvents() {
   $("#sync-failure-list").addEventListener("click", handleAccountAction);
   $("#add-member-form").addEventListener("submit", addMember);
   $("#admin-member-list").addEventListener("click", handleMemberAction);
+  $("#admin-member-list").addEventListener("input", rememberMemberDraft);
   $("#save-settings").addEventListener("click", saveSettings);
   $("#save-proxy").addEventListener("click", saveProxy);
   $("#test-proxy").addEventListener("click", testProxy);
@@ -475,8 +477,10 @@ function renderMembers() {
     return;
   }
   for (const member of state.members) {
+    const draft = state.memberDrafts.get(member.id);
+    const selectedAccountIds = draft?.accountIds || member.accountIds;
     const card = document.createElement("article");
-    card.className = `admin-member-card${member.active ? "" : " inactive"}`;
+    card.className = `admin-member-card${(draft?.active ?? member.active) ? "" : " inactive"}${draft ? " has-unsaved" : ""}`;
     card.dataset.memberId = String(member.id);
 
     const heading = document.createElement("div");
@@ -488,13 +492,14 @@ function renderMembers() {
     meta.textContent = member.lastLoginAt
       ? `上次登录 ${relativeTime(member.lastLoginAt)}`
       : `创建于 ${relativeTime(member.createdAt)}`;
+    if (draft) meta.textContent += " · 有未保存更改";
     identity.append(title, meta);
     const active = document.createElement("label");
     active.className = "member-active-control";
     const activeInput = document.createElement("input");
     activeInput.type = "checkbox";
     activeInput.dataset.memberActive = "";
-    activeInput.checked = Boolean(member.active);
+    activeInput.checked = Boolean(draft?.active ?? member.active);
     active.append(activeInput, document.createTextNode(" 允许登录"));
     heading.append(identity, active);
 
@@ -515,7 +520,7 @@ function renderMembers() {
       const input = document.createElement("input");
       input.type = "checkbox";
       input.dataset.memberAccountId = String(account.id);
-      input.checked = member.accountIds.includes(account.id);
+      input.checked = selectedAccountIds.includes(account.id);
       const suffix = account.isPublic ? "（公开）" : "（非公开）";
       label.append(input, document.createTextNode(` @${account.username}${suffix}`));
       choices.append(label);
@@ -529,6 +534,7 @@ function renderMembers() {
     password.autocomplete = "new-password";
     password.placeholder = "留空不改密码；输入新密码可重置";
     password.dataset.memberPassword = "";
+    password.value = draft?.password || "";
     const actions = document.createElement("div");
     actions.className = "row-actions";
     actions.append(
@@ -541,6 +547,26 @@ function renderMembers() {
   }
 }
 
+function readMemberDraft(card) {
+  return {
+    active: card.querySelector("[data-member-active]").checked,
+    accountIds: [...card.querySelectorAll("[data-member-account-id]:checked")]
+      .map((input) => Number(input.dataset.memberAccountId)),
+    password: card.querySelector("[data-member-password]").value,
+  };
+}
+
+function rememberMemberDraft(event) {
+  if (!event.target.matches("[data-member-active], [data-member-account-id], [data-member-password]")) return;
+  const card = event.target.closest(".admin-member-card");
+  if (!card) return;
+  const id = Number(card.dataset.memberId);
+  state.memberDrafts.set(id, readMemberDraft(card));
+  card.classList.add("has-unsaved");
+  const meta = card.querySelector(".admin-member-heading small");
+  if (meta && !meta.textContent.includes("有未保存更改")) meta.textContent += " · 有未保存更改";
+}
+
 async function handleMemberAction(event) {
   const button = event.target.closest("[data-member-action]");
   if (!button) return;
@@ -551,24 +577,28 @@ async function handleMemberAction(event) {
   button.disabled = true;
   try {
     if (button.dataset.memberAction === "save-member") {
-      const accountIds = [...card.querySelectorAll("[data-member-account-id]:checked")]
-        .map((input) => Number(input.dataset.memberAccountId));
-      await api(`/api/admin/members/${id}`, {
+      const draft = readMemberDraft(card);
+      const saved = await api(`/api/admin/members/${id}`, {
         method: "PATCH",
         body: {
-          active: card.querySelector("[data-member-active]").checked,
-          accountIds,
-          password: card.querySelector("[data-member-password]").value,
+          active: draft.active,
+          accountIds: draft.accountIds,
+          password: draft.password,
         },
       });
+      state.members = state.members.map((item) => item.id === id ? saved : item);
+      state.memberDrafts.delete(id);
       showToast(`会员 ${member.username} 的权限已保存`);
     } else {
       const confirmation = window.prompt(`删除会员 ${member.username}？请输入会员名确认：`);
       if (confirmation !== member.username) return;
       await api(`/api/admin/members/${id}`, { method: "DELETE" });
+      state.memberDrafts.delete(id);
+      state.members = state.members.filter((item) => item.id !== id);
       showToast(`会员 ${member.username} 已删除`);
     }
-    await reloadMembers();
+    renderMembers();
+    renderStats();
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -838,7 +868,8 @@ async function refreshStatus() {
     renderSyncFailures();
     renderAccounts();
     renderSessions();
-    renderMembers();
+    const memberListFocused = $("#admin-member-list").contains(document.activeElement);
+    if (!state.memberDrafts.size && !memberListFocused) renderMembers();
   } catch (_) { /* polling failures do not interrupt administration */ }
 }
 

@@ -136,7 +136,8 @@ function renderMemberStatus() {
       await api("/api/member/logout", { method: "POST", body: {} });
       location.reload();
     });
-    container.append(copy, logout);
+    const notifications = window.MemberNotifications.createButton(api, showToast);
+    container.append(copy, notifications, logout);
   } else {
     const login = document.createElement("a");
     login.href = `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;
@@ -460,7 +461,6 @@ function renderMedia(media) {
 function createIsolatedVideo(item, contain) {
   const host = document.createElement("div");
   host.className = `media-video-shell${contain ? " media-video-contain" : ""}`;
-  host.setAttribute("aria-label", item.type === "animated_gif" ? "动图播放器" : "视频播放器");
 
   // Keep third-party video download overlays out of the reader layout. Some
   // browser extensions inject fixed-position panels beside every visible
@@ -469,24 +469,63 @@ function createIsolatedVideo(item, contain) {
   const root = host.attachShadow({ mode: "closed" });
   const stylesheet = document.createElement("link");
   stylesheet.rel = "stylesheet";
-  stylesheet.href = "/video-player.css?v=4.9.2";
+  stylesheet.href = "/video-player.css?v=4.10.2";
 
   const video = document.createElement("video");
-  video.src = item.url;
   video.poster = item.previewUrl || "";
-  video.controls = item.type !== "animated_gif";
+  video.controls = false;
   video.loop = item.type === "animated_gif";
   video.muted = item.type === "animated_gif";
   video.autoplay = item.type === "animated_gif";
   video.playsInline = true;
-  video.preload = "metadata";
+  video.preload = "none";
   video.setAttribute("controlslist", "nodownload");
+
+  let started = false;
+  const startPlayback = async () => {
+    if (started) return;
+    started = true;
+    host.classList.add("media-video-started");
+    video.controls = item.type !== "animated_gif";
+    video.src = item.url;
+    video.load();
+    try { await video.play(); } catch (_) { /* native controls remain available */ }
+  };
+
+  const launch = document.createElement("button");
+  launch.type = "button";
+  launch.className = "video-launch";
+  launch.setAttribute("aria-label", item.type === "animated_gif" ? "播放动图" : "播放视频");
+  const launchIcon = document.createElement("span");
+  launchIcon.className = "video-launch-icon";
+  launchIcon.textContent = "▶";
+  const launchText = document.createElement("span");
+  launchText.className = "video-launch-text";
+  launchText.textContent = item.type === "animated_gif" ? "动图" : "播放";
+  launch.append(launchIcon, launchText);
+  launch.addEventListener("click", startPlayback);
 
   const error = document.createElement("div");
   error.className = "video-error";
   error.textContent = "视频暂时无法播放";
   video.addEventListener("error", () => host.classList.add("media-video-error"));
-  root.append(stylesheet, video, error);
+  const controlsSlot = document.createElement("slot");
+  root.append(stylesheet, video, controlsSlot, error);
+  host.append(launch);
+
+  // Animated posts retain their familiar autoplay behavior, but only when
+  // they actually enter the viewport. Normal videos never request their MP4
+  // until the visitor explicitly presses play.
+  if (item.type === "animated_gif" && "IntersectionObserver" in window) {
+    const observer = new IntersectionObserver((entries) => {
+      if (!entries.some((entry) => entry.isIntersecting)) return;
+      observer.disconnect();
+      startPlayback();
+    }, { rootMargin: "80px 0px", threshold: 0.05 });
+    observer.observe(host);
+  } else if (item.type === "animated_gif") {
+    startPlayback();
+  }
   return host;
 }
 

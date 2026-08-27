@@ -132,12 +132,23 @@ class Database:
                     password_digest TEXT NOT NULL,
                     password_rounds INTEGER NOT NULL,
                     active INTEGER NOT NULL DEFAULT 1,
+                    bark_enabled INTEGER NOT NULL DEFAULT 0,
+                    bark_server_url TEXT NOT NULL DEFAULT 'https://api.day.app',
+                    bark_device_key TEXT NOT NULL DEFAULT '',
+                    bark_group TEXT NOT NULL DEFAULT 'Incandescence',
                     last_login_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS member_account_access (
+                    member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    created_at TEXT NOT NULL,
+                    PRIMARY KEY(member_id, account_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS member_notification_accounts (
                     member_id INTEGER NOT NULL REFERENCES members(id) ON DELETE CASCADE,
                     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
                     created_at TEXT NOT NULL,
@@ -164,6 +175,17 @@ class Database:
             ):
                 if column not in tweet_columns:
                     db.execute(f"ALTER TABLE tweets ADD COLUMN {column} {definition}")
+            member_columns = {
+                row["name"] for row in db.execute("PRAGMA table_info(members)").fetchall()
+            }
+            for column, definition in (
+                ("bark_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("bark_server_url", "TEXT NOT NULL DEFAULT 'https://api.day.app'"),
+                ("bark_device_key", "TEXT NOT NULL DEFAULT ''"),
+                ("bark_group", "TEXT NOT NULL DEFAULT 'Incandescence'"),
+            ):
+                if column not in member_columns:
+                    db.execute(f"ALTER TABLE members ADD COLUMN {column} {definition}")
             db.execute("UPDATE accounts SET syncing = 0")
             db.commit()
 
@@ -640,6 +662,106 @@ class Database:
             ).fetchone()
         return row is not None
 
+    def member_accessible_account_ids(self, member_id: int) -> list[int]:
+        """Return every account a member may read, including public accounts."""
+
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT a.id FROM accounts a
+                   WHERE a.is_public = 1 OR EXISTS (
+                       SELECT 1 FROM member_account_access maa
+                       JOIN members m ON m.id = maa.member_id
+                       WHERE maa.member_id = ? AND maa.account_id = a.id AND m.active = 1
+                   )
+                   ORDER BY lower(a.username)""",
+                (member_id,),
+            ).fetchall()
+        return [int(row["id"]) for row in rows]
+
+    def get_member_notification_settings(self, member_id: int) -> dict[str, Any]:
+        member = self.get_member(member_id)
+        accessible = set(self.member_accessible_account_ids(member_id))
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT account_id FROM member_notification_accounts
+                   WHERE member_id = ? ORDER BY account_id""",
+                (member_id,),
+            ).fetchall()
+        return {
+            "enabled": bool(member.get("bark_enabled")),
+            "server_url": str(member.get("bark_server_url") or "https://api.day.app"),
+            "device_key": str(member.get("bark_device_key") or ""),
+            "group": str(member.get("bark_group") or "Incandescence"),
+            "account_ids": [
+                int(row["account_id"])
+                for row in rows
+                if int(row["account_id"]) in accessible
+            ],
+        }
+
+    def update_member_notification_settings(
+        self,
+        member_id: int,
+        *,
+        enabled: bool,
+        server_url: str,
+        device_key: str | None,
+        group: str,
+        account_ids: list[int],
+    ) -> dict[str, Any]:
+        unique_ids = sorted({int(value) for value in account_ids})
+        accessible = set(self.member_accessible_account_ids(member_id))
+        if any(account_id not in accessible for account_id in unique_ids):
+            raise ValueError("通知账号中包含当前会员无权访问的账号")
+        with self.connection() as db:
+            try:
+                db.execute("BEGIN IMMEDIATE")
+                changed = db.execute(
+                    """UPDATE members SET bark_enabled = ?, bark_server_url = ?,
+                           bark_device_key = COALESCE(?, bark_device_key), bark_group = ?,
+                           updated_at = ? WHERE id = ?""",
+                    (int(enabled), server_url, device_key, group, utc_now(), member_id),
+                ).rowcount
+                if not changed:
+                    raise KeyError("会员不存在")
+                db.execute(
+                    "DELETE FROM member_notification_accounts WHERE member_id = ?",
+                    (member_id,),
+                )
+                for account_id in unique_ids:
+                    db.execute(
+                        """INSERT INTO member_notification_accounts(
+                               member_id, account_id, created_at
+                           ) VALUES (?, ?, ?)""",
+                        (member_id, account_id, utc_now()),
+                    )
+                db.commit()
+            except Exception:
+                db.rollback()
+                raise
+        return self.get_member_notification_settings(member_id)
+
+    def list_member_notification_targets(self, account_id: int) -> list[dict[str, Any]]:
+        """Return enabled Bark destinations that remain authorized for an account."""
+
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT m.id AS member_id, m.username, m.bark_server_url,
+                          m.bark_device_key, m.bark_group
+                   FROM member_notification_accounts mna
+                   JOIN members m ON m.id = mna.member_id
+                   JOIN accounts a ON a.id = mna.account_id
+                   WHERE mna.account_id = ? AND m.active = 1 AND m.bark_enabled = 1
+                     AND m.bark_device_key <> ''
+                     AND (a.is_public = 1 OR EXISTS (
+                         SELECT 1 FROM member_account_access maa
+                         WHERE maa.member_id = m.id AND maa.account_id = a.id
+                     ))
+                   ORDER BY lower(m.username)""",
+                (account_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
     def create_member(
         self, username: str, password_salt: str, password_digest: str, rounds: int
     ) -> dict[str, Any]:
@@ -727,6 +849,17 @@ class Database:
                            VALUES (?, ?, ?)""",
                         (member_id, account_id, utc_now()),
                     )
+                db.execute(
+                    """DELETE FROM member_notification_accounts
+                       WHERE member_id = ? AND account_id IN (
+                           SELECT a.id FROM accounts a
+                           WHERE a.is_public = 0 AND NOT EXISTS (
+                               SELECT 1 FROM member_account_access maa
+                               WHERE maa.member_id = ? AND maa.account_id = a.id
+                           )
+                       )""",
+                    (member_id, member_id),
+                )
                 db.commit()
             except Exception:
                 db.rollback()

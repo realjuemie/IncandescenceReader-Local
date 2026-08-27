@@ -11,6 +11,7 @@ from http.cookies import SimpleCookie
 from threading import RLock
 from typing import Any
 
+from .config import normalize_bark_device_key, normalize_http_base_url
 from .database import Database
 
 
@@ -142,6 +143,68 @@ class MemberAuth:
 
     def list_members(self) -> list[dict[str, Any]]:
         return [self.public_member(item) for item in self.database.list_members()]
+
+    def notification_settings(self, member_id: int) -> dict[str, Any]:
+        settings = self.database.get_member_notification_settings(member_id)
+        accounts = self.database.list_accounts(member_id=member_id)
+        return {
+            "enabled": bool(settings["enabled"]),
+            "serverUrl": settings["server_url"],
+            "deviceKeyConfigured": bool(settings["device_key"]),
+            "group": settings["group"],
+            "accountIds": settings["account_ids"],
+            "availableAccounts": [
+                {
+                    "id": int(account["id"]),
+                    "username": account["username"],
+                    "displayName": account.get("display_name") or account["username"],
+                    "isPublic": bool(account.get("is_public", 1)),
+                }
+                for account in accounts
+            ],
+        }
+
+    def update_notification_settings(
+        self,
+        member_id: int,
+        *,
+        enabled: bool,
+        server_url: Any,
+        device_key: Any | None,
+        clear_device_key: bool,
+        group: Any,
+        account_ids: Any,
+    ) -> dict[str, Any]:
+        current = self.database.get_member_notification_settings(member_id)
+        normalized_server = normalize_http_base_url(
+            server_url or "https://api.day.app",
+            field_name="Bark 服务器地址",
+            allow_path=True,
+        )
+        if clear_device_key:
+            normalized_key: str | None = ""
+        elif device_key is not None and str(device_key).strip():
+            normalized_key = normalize_bark_device_key(device_key)
+        else:
+            normalized_key = None
+        effective_key = current["device_key"] if normalized_key is None else normalized_key
+        normalized_group = str(group or "Incandescence").strip()[:64] or "Incandescence"
+        if not isinstance(account_ids, list):
+            raise ValueError("通知账号列表格式无效")
+        normalized_ids = sorted({int(value) for value in account_ids})
+        if enabled and not effective_key:
+            raise ValueError("开启 Bark 推送前请填写 Device Key")
+        if enabled and not normalized_ids:
+            raise ValueError("开启 Bark 推送前请至少选择一个通知账号")
+        self.database.update_member_notification_settings(
+            member_id,
+            enabled=enabled,
+            server_url=normalized_server,
+            device_key=normalized_key,
+            group=normalized_group,
+            account_ids=normalized_ids,
+        )
+        return self.notification_settings(member_id)
 
     def _public_member_by_id(self, member_id: int) -> dict[str, Any]:
         for item in self.database.list_members():

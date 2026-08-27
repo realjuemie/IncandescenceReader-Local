@@ -263,6 +263,55 @@ class MemberAuthTests(unittest.TestCase):
             )
             self.assertIsNone(auth.current(cookie))
 
+    def test_member_bark_settings_are_scoped_to_accessible_accounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            public = db.create_account("public_user")
+            private = db.create_account("private_user")
+            forbidden = db.create_account("forbidden_user")
+            for account in (private, forbidden):
+                db.update_account_options(
+                    account["id"],
+                    include_replies=True,
+                    include_reposts=False,
+                    is_public=False,
+                )
+            auth = MemberAuth(db)
+            member = auth.create_member(
+                "reader_one", "member-password", [private["id"]]
+            )
+            saved = auth.update_notification_settings(
+                member["id"],
+                enabled=True,
+                server_url="https://api.day.app/",
+                device_key="member-device-key",
+                clear_device_key=False,
+                group="我的订阅",
+                account_ids=[public["id"], private["id"]],
+            )
+            self.assertTrue(saved["enabled"])
+            self.assertTrue(saved["deviceKeyConfigured"])
+            self.assertNotIn("deviceKey", saved)
+            self.assertEqual(set(saved["accountIds"]), {public["id"], private["id"]})
+            self.assertEqual(
+                db.list_member_notification_targets(private["id"])[0]["member_id"],
+                member["id"],
+            )
+            with self.assertRaises(ValueError):
+                auth.update_notification_settings(
+                    member["id"],
+                    enabled=True,
+                    server_url="https://api.day.app",
+                    device_key=None,
+                    clear_device_key=False,
+                    group="我的订阅",
+                    account_ids=[forbidden["id"]],
+                )
+            auth.update_member(member["id"], active=True, account_ids=[])
+            after_revoke = auth.notification_settings(member["id"])
+            self.assertEqual(after_revoke["accountIds"], [public["id"]])
+            self.assertEqual(db.list_member_notification_targets(private["id"]), [])
+
 
 class FakeValidCredentialScraper(FreeXScraper):
     async def validate_cookies(self, cookies, *, user_id=None):
@@ -545,6 +594,35 @@ class SyncTests(unittest.TestCase):
             self.assertNotIn("notification", first)
             self.assertTrue(second["notification"]["sent"])
             self.assertEqual(len(notifier.calls), 1)
+
+    def test_incremental_sync_sends_selected_member_notification(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = Database(root / "reader.db")
+            account = db.create_account("example")
+            auth = MemberAuth(db)
+            member = auth.create_member("reader_one", "member-password", [])
+            auth.update_notification_settings(
+                member["id"],
+                enabled=True,
+                server_url="https://api.day.app",
+                device_key="member-device-key",
+                clear_device_key=False,
+                group="我的订阅",
+                account_ids=[account["id"]],
+            )
+            notifier = FakeNotifier()
+            service = SyncService(
+                db, ConfigStore(root), FakeScraper(), FakeMedia(), notifier=notifier
+            )
+            asyncio.run(service.sync_account(account["id"]))
+            second = asyncio.run(service.sync_account(account["id"]))
+            self.assertEqual(second["memberNotifications"]["sent"], 1)
+            self.assertEqual(second["memberNotifications"]["failed"], 0)
+            self.assertEqual(len(notifier.calls), 2)
+            member_call = next(call for call in notifier.calls if "settings" in call)
+            self.assertEqual(member_call["settings"]["barkDeviceKey"], "member-device-key")
+            self.assertEqual(member_call["settings"]["barkGroup"], "我的订阅")
 
     def test_sync_all_failure_identifies_account_and_reason(self):
         with tempfile.TemporaryDirectory() as directory:

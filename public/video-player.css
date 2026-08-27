@@ -3,6 +3,7 @@
   min-height: 190px;
   display: block;
   overflow: hidden;
+  position: relative;
   background: #000;
 }
 

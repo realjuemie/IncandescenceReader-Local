@@ -115,6 +115,43 @@ class SyncService:
                         "sent": False,
                         "error": str(notification_error),
                     }
+                member_notifications: list[dict[str, Any]] = []
+                site_base_url = str(settings.get("siteBaseUrl") or "")
+                for target in self.database.list_member_notification_targets(account_id):
+                    try:
+                        delivered = await self.notifier.notify_account_update(
+                            account_id=account_id,
+                            profile=result["profile"],
+                            tweets=result["tweets"],
+                            inserted=inserted,
+                            settings={
+                                "barkEnabled": True,
+                                "barkServerUrl": target["bark_server_url"],
+                                "barkDeviceKey": target["bark_device_key"],
+                                "barkGroup": target["bark_group"],
+                                "siteBaseUrl": site_base_url,
+                            },
+                        )
+                        member_notifications.append(
+                            {
+                                "memberId": int(target["member_id"]),
+                                "sent": bool(delivered),
+                            }
+                        )
+                    except Exception as member_notification_error:
+                        member_notifications.append(
+                            {
+                                "memberId": int(target["member_id"]),
+                                "sent": False,
+                                "error": str(member_notification_error),
+                            }
+                        )
+                if member_notifications:
+                    response["memberNotifications"] = {
+                        "sent": sum(1 for item in member_notifications if item["sent"]),
+                        "failed": sum(1 for item in member_notifications if not item["sent"]),
+                        "items": member_notifications,
+                    }
             return response
         except Exception as error:
             try:
