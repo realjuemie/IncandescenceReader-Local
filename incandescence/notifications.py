@@ -29,7 +29,7 @@ class BarkNotifier:
         return await self._send(
             settings,
             title="Incandescence · Bark 测试成功",
-            body="通知渠道已连接。后续抓取到账号的新内容时会在这里提醒。",
+            body="通知渠道已连接。后续抓取到新内容或 X 登录凭证失效时会在这里提醒。",
             icon_url=icon_url,
             target_url=settings.get("siteBaseUrl") or None,
         )
@@ -79,6 +79,36 @@ class BarkNotifier:
             title=f"@{username} 有 {inserted} 条新内容",
             body="\n".join(lines),
             icon_url=str(profile.get("avatar_url") or "") or None,
+            target_url=target_url,
+        )
+
+    async def notify_invalid_credentials(
+        self,
+        *,
+        sessions: list[dict[str, Any]],
+        cause: str | None = None,
+    ) -> dict[str, Any] | None:
+        settings = self.config.get()
+        if not settings["barkEnabled"] or not sessions:
+            return None
+        lines = ["以下 X 登录凭证已不可用，请在管理后台重新导入 Cookie："]
+        for item in sessions[:12]:
+            label = str(item.get("label") or "未命名凭证")
+            username = str(item.get("verifiedUsername") or "").lstrip("@")
+            identity = f"{label}（@{username}）" if username else label
+            reason = str(item.get("error") or "验证失败或登录状态已失效").strip()
+            lines.append(f"• {identity}：{_summary_text(reason)}")
+        if len(sessions) > 12:
+            lines.append(f"另有 {len(sessions) - 12} 个凭证失效")
+        if cause:
+            lines.append("触发原因：" + _summary_text(cause))
+        base_url = str(settings.get("siteBaseUrl") or "").rstrip("/")
+        target_url = f"{base_url}/admin#credential-panel" if base_url else None
+        return await self._send(
+            settings,
+            title=f"X 登录凭证失效（{len(sessions)}）",
+            body="\n".join(lines),
+            icon_url=None,
             target_url=target_url,
         )
 

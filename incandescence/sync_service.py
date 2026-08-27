@@ -121,10 +121,38 @@ class SyncService:
                 self.database.mark_sync_failed(account_id, str(error))
             except Exception:
                 pass
+            await self.notify_invalid_credentials(cause=str(error))
             raise
         finally:
             self._current_account_id = None
             self._lock.release()
+
+    async def notify_invalid_credentials(
+        self, *, cause: str | None = None
+    ) -> dict[str, Any] | None:
+        """Send one Bark alert per invalidation cycle without breaking sync."""
+
+        if not self.notifier:
+            return None
+        try:
+            pending = self.scraper.pending_invalid_session_alerts()
+            sessions = (
+                await self.scraper_runtime.await_result(pending)
+                if self.scraper_runtime
+                else await pending
+            )
+            if not sessions:
+                return None
+            notification = await self.notifier.notify_invalid_credentials(
+                sessions=sessions, cause=cause
+            )
+            if notification:
+                self.scraper.mark_invalid_session_alerted(
+                    [str(item.get("label") or "") for item in sessions]
+                )
+            return notification
+        except Exception as notification_error:
+            return {"sent": False, "error": str(notification_error)}
 
     async def backfill_author_avatars(self, account_id: int) -> dict[str, int]:
         account = self.database.get_account(account_id)

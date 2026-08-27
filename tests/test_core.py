@@ -138,6 +138,44 @@ class BarkNotifierTests(unittest.TestCase):
             self.assertEqual(captured["url"], "http://192.168.1.20:8787/reader?account=7")
             self.assertEqual(captured["group"], "本地阅读更新")
 
+    def test_invalid_credential_payload_links_to_admin_credentials(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConfigStore(Path(directory))
+            store.update(
+                {
+                    "barkEnabled": True,
+                    "barkDeviceKey": "device-key-123",
+                    "siteBaseUrl": "http://192.168.1.20:8787",
+                }
+            )
+            captured = {}
+
+            def handle(request: httpx.Request) -> httpx.Response:
+                captured.update(json.loads(request.content.decode("utf-8")))
+                return httpx.Response(200, json={"code": 200, "message": "success"})
+
+            notifier = BarkNotifier(store, transport=httpx.MockTransport(handle))
+            result = asyncio.run(
+                notifier.notify_invalid_credentials(
+                    sessions=[
+                        {
+                            "label": "main-session",
+                            "verifiedUsername": "owner",
+                            "error": "Cookie 已失效",
+                        }
+                    ],
+                    cause="没有可用的 X 登录会话",
+                )
+            )
+            self.assertTrue(result["sent"])
+            self.assertEqual(captured["title"], "X 登录凭证失效（1）")
+            self.assertIn("main-session（@owner）", captured["body"])
+            self.assertIn("Cookie 已失效", captured["body"])
+            self.assertEqual(
+                captured["url"],
+                "http://192.168.1.20:8787/admin#credential-panel",
+            )
+
 
 class CookieParsingTests(unittest.TestCase):
     def test_extracts_required_values_from_large_cookie_header(self):
@@ -436,6 +474,31 @@ class FailingScraper:
         raise RuntimeError("Could not find user")
 
 
+class FailingInvalidCredentialScraper:
+    def __init__(self):
+        self.alerted = False
+
+    async def fetch_latest(self, **kwargs):
+        raise RuntimeError("没有可用的 X 登录会话，请在设置中添加 Cookie")
+
+    async def pending_invalid_session_alerts(self):
+        if self.alerted:
+            return []
+        return [
+            {
+                "label": "main-session",
+                "verifiedUsername": "owner",
+                "active": False,
+                "loggedIn": False,
+                "credentialState": "invalid",
+                "error": "Cookie 已失效",
+            }
+        ]
+
+    def mark_invalid_session_alerted(self, labels):
+        self.alerted = labels == ["main-session"]
+
+
 class FakeMedia:
     async def download_profile_assets(self, *args, **kwargs):
         return None, None
@@ -450,9 +513,14 @@ class FakeMedia:
 class FakeNotifier:
     def __init__(self):
         self.calls = []
+        self.invalid_calls = []
 
     async def notify_account_update(self, **kwargs):
         self.calls.append(kwargs)
+        return {"sent": True, "status": 200, "elapsedMs": 1}
+
+    async def notify_invalid_credentials(self, **kwargs):
+        self.invalid_calls.append(kwargs)
         return {"sent": True, "status": 200, "elapsedMs": 1}
 
 
@@ -492,6 +560,29 @@ class SyncTests(unittest.TestCase):
             failed = db.get_account(account["id"])
             self.assertEqual(failed["last_error"], "Could not find user")
             self.assertIsNotNone(failed["last_sync_failed_at"])
+
+    def test_invalid_credential_bark_alert_is_deduplicated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = Database(root / "reader.db")
+            account = db.create_account("example")
+            scraper = FailingInvalidCredentialScraper()
+            notifier = FakeNotifier()
+            service = SyncService(
+                db, ConfigStore(root), scraper, FakeMedia(), notifier=notifier
+            )
+
+            first = asyncio.run(service.sync_all(reason="schedule"))
+            second = asyncio.run(service.sync_all(reason="schedule"))
+
+            self.assertEqual(first["failed"], 1)
+            self.assertEqual(second["failed"], 1)
+            self.assertEqual(len(notifier.invalid_calls), 1)
+            self.assertEqual(
+                notifier.invalid_calls[0]["sessions"][0]["label"], "main-session"
+            )
+            self.assertTrue(scraper.alerted)
+            self.assertIsNotNone(db.get_account(account["id"])["last_sync_failed_at"])
 
 
 if __name__ == "__main__":

@@ -206,6 +206,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         except Exception as error:
             self._handle_error(error)
 
+    def do_HEAD(self) -> None:  # noqa: N802
+        """Serve metadata for static and media files used by video clients."""
+
+        try:
+            path = urlsplit(self.path).path
+            if path.startswith("/files/"):
+                self._serve_data_file(path.removeprefix("/files/"))
+                return
+            if path.startswith("/api/"):
+                self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
+                return
+            self._serve_static(path)
+        except Exception as error:
+            self._handle_error(error)
+
     def do_POST(self) -> None:  # noqa: N802
         try:
             path = urlsplit(self.path).path
@@ -293,10 +308,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             match = re.fullmatch(r"/api/admin/scraper-sessions/(.+)/validate", path)
             if match:
-                result = self.app.scraper_runtime.run(
-                    self.app.scraper.validate_saved_session(unquote(match.group(1))),
-                    timeout=45,
-                )
+                try:
+                    result = self.app.scraper_runtime.run(
+                        self.app.scraper.validate_saved_session(unquote(match.group(1))),
+                        timeout=45,
+                    )
+                except ValueError as error:
+                    asyncio.run(
+                        self.app.sync_service.notify_invalid_credentials(cause=str(error))
+                    )
+                    raise
                 self._json(result)
                 return
             if path == "/api/admin/sync-all":
@@ -519,15 +540,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_header("Content-Range", f"bytes {start}-{end}/{size}")
         self._security_headers()
         self.end_headers()
+        if self.command == "HEAD":
+            return
         with path.open("rb") as source:
             source.seek(start)
             remaining = length
-            while remaining:
-                chunk = source.read(min(64 * 1024, remaining))
-                if not chunk:
-                    break
-                self.wfile.write(chunk)
-                remaining -= len(chunk)
+            try:
+                while remaining:
+                    chunk = source.read(min(64 * 1024, remaining))
+                    if not chunk:
+                        break
+                    self.wfile.write(chunk)
+                    remaining -= len(chunk)
+            except (BrokenPipeError, ConnectionAbortedError, ConnectionResetError):
+                # Browsers routinely cancel an in-flight video range request
+                # after receiving enough metadata and open a different range.
+                return
 
     def _json(
         self,

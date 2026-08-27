@@ -450,20 +450,44 @@ function renderMedia(media) {
       button.append(image);
       wrap.append(button);
     } else {
-      const video = document.createElement("video");
-      video.src = item.url;
-      video.poster = item.previewUrl || "";
-      video.controls = item.type !== "animated_gif";
-      video.loop = item.type === "animated_gif";
-      video.muted = item.type === "animated_gif";
-      video.autoplay = item.type === "animated_gif";
-      video.playsInline = true;
-      video.preload = "metadata";
-      wrap.append(video);
+      wrap.append(createIsolatedVideo(item, media.length === 1));
     }
     grid.append(wrap);
   }
   return grid;
+}
+
+function createIsolatedVideo(item, contain) {
+  const host = document.createElement("div");
+  host.className = `media-video-shell${contain ? " media-video-contain" : ""}`;
+  host.setAttribute("aria-label", item.type === "animated_gif" ? "动图播放器" : "视频播放器");
+
+  // Keep third-party video download overlays out of the reader layout. Some
+  // browser extensions inject fixed-position panels beside every visible
+  // <video>; a closed shadow root preserves native controls without exposing
+  // the element as part of the page DOM they scan.
+  const root = host.attachShadow({ mode: "closed" });
+  const stylesheet = document.createElement("link");
+  stylesheet.rel = "stylesheet";
+  stylesheet.href = "/video-player.css?v=4.9.2";
+
+  const video = document.createElement("video");
+  video.src = item.url;
+  video.poster = item.previewUrl || "";
+  video.controls = item.type !== "animated_gif";
+  video.loop = item.type === "animated_gif";
+  video.muted = item.type === "animated_gif";
+  video.autoplay = item.type === "animated_gif";
+  video.playsInline = true;
+  video.preload = "metadata";
+  video.setAttribute("controlslist", "nodownload");
+
+  const error = document.createElement("div");
+  error.className = "video-error";
+  error.textContent = "视频暂时无法播放";
+  video.addEventListener("error", () => host.classList.add("media-video-error"));
+  root.append(stylesheet, video, error);
+  return host;
 }
 
 function openLightbox(url, alt, trigger) {

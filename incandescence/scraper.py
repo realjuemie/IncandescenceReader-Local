@@ -98,6 +98,47 @@ class FreeXScraper:
             for item in items
         ]
 
+    async def pending_invalid_session_alerts(self) -> list[dict[str, Any]]:
+        """Return newly invalid sessions and clear dedupe state after recovery."""
+
+        sessions = await self.list_sessions()
+        with self._metadata_lock:
+            metadata = self._read_metadata()
+            changed = False
+            pending: list[dict[str, Any]] = []
+            for item in sessions:
+                label = str(item.get("label") or "")
+                state = metadata.setdefault(label, {})
+                invalid = (
+                    item.get("credentialState") == "invalid"
+                    or not bool(item.get("active"))
+                    or not bool(item.get("loggedIn"))
+                )
+                if not invalid:
+                    if state.pop("invalidAlertSent", None) is not None:
+                        changed = True
+                    continue
+                if not state.get("invalidAlertSent"):
+                    pending.append(item)
+            if changed:
+                self._write_metadata(metadata)
+        return pending
+
+    def mark_invalid_session_alerted(self, labels: list[str]) -> None:
+        if not labels:
+            return
+        with self._metadata_lock:
+            metadata = self._read_metadata()
+            changed = False
+            for label in labels:
+                if label not in metadata:
+                    metadata[label] = {}
+                if not metadata[label].get("invalidAlertSent"):
+                    metadata[label]["invalidAlertSent"] = True
+                    changed = True
+            if changed:
+                self._write_metadata(metadata)
+
     async def add_session(self, label: str, cookies: str) -> dict[str, Any]:
         parsed = extract_session_cookies(cookies)
         validation = await self.validate_cookies(

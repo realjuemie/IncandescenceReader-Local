@@ -7,7 +7,7 @@
   <title>Incandescence · 管理后台</title>
   <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
   <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=4.8.1">
+  <link rel="stylesheet" href="/styles.css?v=4.9.1">
 </head>
 <body class="admin-body">
   <main class="admin-auth-view" id="auth-view">
@@ -104,7 +104,7 @@
               <div>
                 <div class="eyebrow">BARK NOTIFICATIONS</div>
                 <h2>Bark 更新通知</h2>
-                <p>只在增量更新抓到新内容时推送；首次归档不会发送历史内容提醒。通知包含账号头像、新增数量、内容摘要和阅读链接。</p>
+                <p>增量更新抓到新内容或 X 登录凭证失效时推送；首次归档不会发送历史内容提醒。凭证失效通知会直接定位到后台凭证区域。</p>
               </div>
               <label class="switch"><input type="checkbox" id="bark-enabled"><span></span></label>
             </header>
@@ -223,6 +223,6 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin.js?v=4.8.1" defer></script>
+  <script src="/admin.js?v=4.9.1" defer></script>
 </body>
 </html>

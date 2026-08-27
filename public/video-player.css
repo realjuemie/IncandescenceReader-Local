@@ -1,0 +1,47 @@
+:host {
+  width: 100%;
+  min-height: 190px;
+  display: block;
+  overflow: hidden;
+  background: #000;
+}
+
+video {
+  width: 100%;
+  min-height: 190px;
+  max-height: 520px;
+  display: block;
+  object-fit: cover;
+  background: #000;
+}
+
+:host(.media-video-contain) video {
+  object-fit: contain;
+}
+
+.video-error {
+  min-height: 190px;
+  display: none;
+  place-items: center;
+  padding: 18px;
+  color: #cfd9de;
+  background: #0f1419;
+  font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-align: center;
+}
+
+:host(.media-video-error) video {
+  display: none;
+}
+
+:host(.media-video-error) .video-error {
+  display: grid;
+}
+
+@media (max-width: 600px) {
+  :host,
+  video,
+  .video-error {
+    min-height: 135px;
+  }
+}
