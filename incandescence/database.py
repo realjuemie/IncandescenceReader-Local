@@ -507,14 +507,28 @@ class Database:
             clauses.append("t.text LIKE ? ESCAPE '\\'")
             escaped = query.strip().replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             params.append(f"%{escaped}%")
+        own_author_clause = """(
+            (
+                a.x_user_id IS NOT NULL AND a.x_user_id <> ''
+                AND t.author_id IS NOT NULL AND t.author_id <> ''
+                AND t.author_id = a.x_user_id
+            )
+            OR (
+                (a.x_user_id IS NULL OR a.x_user_id = '' OR t.author_id IS NULL OR t.author_id = '')
+                AND lower(t.author_username) = lower(a.username)
+            )
+        )"""
         if kind == "replies":
             clauses.append("t.is_reply = 1")
         elif kind == "reposts":
             clauses.append("t.is_repost = 1")
         elif kind == "media":
+            clauses.append("t.is_repost = 0")
+            clauses.append(own_author_clause)
             clauses.append("EXISTS (SELECT 1 FROM media em WHERE em.tweet_id = t.id)")
         elif kind == "originals":
             clauses.append("t.is_reply = 0 AND t.is_repost = 0")
+            clauses.append(own_author_clause)
         if year not in (None, ""):
             year_value = int(year)
             if not 2006 <= year_value <= 2100:
@@ -595,11 +609,15 @@ class Database:
             item = self._tweet_public(dict(row), media_map[str(row["id"])])
             parent_id = str(row["reply_to_id"] or "")
             parent = tweet_rows.get(parent_id)
-            item["repliedTo"] = (
+            replied_to = (
                 self._tweet_public(dict(parent), media_map[parent_id])
                 if parent is not None and parent_id != str(row["id"])
                 else None
             )
+            if kind == "media" and replied_to is not None:
+                # 媒体标签只展示命中帖子自身的附件，回复上下文中的原贴媒体不重复展示。
+                replied_to["media"] = []
+            item["repliedTo"] = replied_to
             items.append(item)
         next_cursor = None
         if len(rows) > limit and page:
@@ -865,6 +883,30 @@ class Database:
                 db.rollback()
                 raise
         return self.get_member(member_id)
+
+    def update_member_password(
+        self,
+        member_id: int,
+        *,
+        password_salt: str,
+        password_digest: str,
+        password_rounds: int,
+    ) -> None:
+        with self.connection() as db:
+            changed = db.execute(
+                """UPDATE members SET password_salt = ?, password_digest = ?,
+                       password_rounds = ?, updated_at = ? WHERE id = ?""",
+                (
+                    password_salt,
+                    password_digest,
+                    password_rounds,
+                    utc_now(),
+                    member_id,
+                ),
+            ).rowcount
+            db.commit()
+        if not changed:
+            raise KeyError("会员不存在")
 
     def mark_member_login(self, member_id: int) -> None:
         with self.connection() as db:

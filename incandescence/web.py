@@ -368,6 +368,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlsplit(self.path).path
             body = self._read_json()
+            if path == "/api/member/password":
+                member = self._require_member()
+                self.app.member_auth.change_password(
+                    int(member["id"]),
+                    current_password=str(body.get("currentPassword") or ""),
+                    new_password=str(body.get("newPassword") or ""),
+                    cookie_header=self.headers.get("Cookie"),
+                )
+                self._json({"updated": True})
+                return
             if path == "/api/member/notifications":
                 member = self._require_member()
                 settings = self.app.member_auth.update_notification_settings(

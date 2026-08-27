@@ -127,8 +127,9 @@ function renderMemberStatus() {
   const container = $("#reader-member-status");
   container.replaceChildren();
   if (state.member) {
-    const copy = document.createElement("span");
-    copy.textContent = `会员 ${state.member.username}`;
+    const identity = window.MemberNotifications.createIdentityButton(
+      state.member, api, showToast,
+    );
     const logout = document.createElement("button");
     logout.type = "button";
     logout.textContent = "退出";
@@ -137,7 +138,7 @@ function renderMemberStatus() {
       location.reload();
     });
     const notifications = window.MemberNotifications.createButton(api, showToast);
-    container.append(copy, notifications, logout);
+    container.append(identity, notifications, logout);
   } else {
     const login = document.createElement("a");
     login.href = `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;

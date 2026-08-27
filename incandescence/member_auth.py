@@ -88,6 +88,44 @@ class MemberAuth:
         member = self.database.get_member_by_username(normalized)
         if not member or not bool(member.get("active")):
             raise ValueError("会员名或密码不正确")
+        if not self._password_matches(member, password):
+            raise ValueError("会员名或密码不正确")
+        token = secrets.token_urlsafe(32)
+        now = time.time()
+        with self._lock:
+            self._remove_expired_unlocked(now)
+            self._sessions[token] = (int(member["id"]), now + self.SESSION_SECONDS)
+        self.database.mark_member_login(int(member["id"]))
+        return token, self.public_member(self.database.get_member(int(member["id"])))
+
+    def change_password(
+        self,
+        member_id: int,
+        *,
+        current_password: str,
+        new_password: str,
+        cookie_header: str | None,
+    ) -> None:
+        member = self.database.get_member(member_id)
+        if not bool(member.get("active")) or not self._password_matches(
+            member, current_password
+        ):
+            raise ValueError("当前密码不正确")
+        validated = self.validate_password(new_password)
+        salt, digest = self._hash_password(validated)
+        self.database.update_member_password(
+            member_id,
+            password_salt=salt,
+            password_digest=digest,
+            password_rounds=self.PBKDF2_ROUNDS,
+        )
+        self.invalidate_member(
+            member_id,
+            except_token=self._cookie_token(cookie_header),
+        )
+
+    @staticmethod
+    def _password_matches(member: dict[str, Any], password: str) -> bool:
         try:
             salt = base64.b64decode(member["password_salt"], validate=True)
             expected = base64.b64decode(member["password_digest"], validate=True)
@@ -97,15 +135,7 @@ class MemberAuth:
         actual = hashlib.pbkdf2_hmac(
             "sha256", str(password or "").encode("utf-8"), salt, rounds
         )
-        if not hmac.compare_digest(actual, expected):
-            raise ValueError("会员名或密码不正确")
-        token = secrets.token_urlsafe(32)
-        now = time.time()
-        with self._lock:
-            self._remove_expired_unlocked(now)
-            self._sessions[token] = (int(member["id"]), now + self.SESSION_SECONDS)
-        self.database.mark_member_login(int(member["id"]))
-        return token, self.public_member(self.database.get_member(int(member["id"])))
+        return hmac.compare_digest(actual, expected)
 
     def current(self, cookie_header: str | None) -> dict[str, Any] | None:
         token = self._cookie_token(cookie_header)
@@ -135,10 +165,10 @@ class MemberAuth:
             with self._lock:
                 self._sessions.pop(token, None)
 
-    def invalidate_member(self, member_id: int) -> None:
+    def invalidate_member(self, member_id: int, *, except_token: str | None = None) -> None:
         with self._lock:
             for token, session in list(self._sessions.items()):
-                if session[0] == member_id:
+                if session[0] == member_id and token != except_token:
                     self._sessions.pop(token, None)
 
     def list_members(self) -> list[dict[str, Any]]:

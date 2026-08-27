@@ -5,7 +5,9 @@ import json
 import sqlite3
 import tempfile
 import unittest
+from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 
@@ -312,6 +314,36 @@ class MemberAuthTests(unittest.TestCase):
             self.assertEqual(after_revoke["accountIds"], [public["id"]])
             self.assertEqual(db.list_member_notification_targets(private["id"]), [])
 
+    def test_member_can_change_password_and_other_sessions_are_invalidated(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            auth = MemberAuth(db)
+            member = auth.create_member("reader_one", "member-password", [])
+            current_token, _ = auth.login("reader_one", "member-password")
+            other_token, _ = auth.login("reader_one", "member-password")
+            current_cookie = f"{auth.COOKIE_NAME}={current_token}"
+            other_cookie = f"{auth.COOKIE_NAME}={other_token}"
+
+            with self.assertRaisesRegex(ValueError, "当前密码不正确"):
+                auth.change_password(
+                    member["id"],
+                    current_password="wrong-password",
+                    new_password="updated-password",
+                    cookie_header=current_cookie,
+                )
+            auth.change_password(
+                member["id"],
+                current_password="member-password",
+                new_password="updated-password",
+                cookie_header=current_cookie,
+            )
+
+            self.assertIsNotNone(auth.current(current_cookie))
+            self.assertIsNone(auth.current(other_cookie))
+            with self.assertRaises(ValueError):
+                auth.login("reader_one", "member-password")
+            self.assertTrue(auth.login("reader_one", "updated-password")[0])
+
 
 class FakeValidCredentialScraper(FreeXScraper):
     async def validate_cookies(self, cookies, *, user_id=None):
@@ -340,6 +372,45 @@ class CredentialSaveTests(unittest.TestCase):
             self.assertEqual(result["label"], "verified_user")
             self.assertEqual(result["credentialState"], "valid")
             self.assertEqual(result["verifiedUsername"], "verified_user")
+
+
+class ScraperMappingTests(unittest.TestCase):
+    def test_reply_is_detected_when_x_omits_the_parent_tweet_id(self):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+        user = SimpleNamespace(
+            id="42",
+            username="example",
+            displayname="Example",
+            profileImageUrl=None,
+        )
+        tweet = SimpleNamespace(
+            id="301",
+            user=user,
+            rawContent="@target reply",
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            conversationId="300",
+            inReplyToTweetId=None,
+            inReplyToUser=None,
+            inReplyToScreenName="target",
+            lang="zh",
+            retweetedTweet=None,
+            quotedTweet=None,
+            possibly_sensitive=False,
+            replyCount=0,
+            retweetCount=0,
+            likeCount=0,
+            quoteCount=0,
+            bookmarkedCount=0,
+            viewCount=0,
+            links=[],
+            url="https://x.com/example/status/301",
+            media=media,
+        )
+
+        mapped = FreeXScraper._tweet_to_dict(tweet)
+
+        self.assertTrue(mapped["is_reply"])
+        self.assertEqual(mapped["reply_to_username"], "target")
 
 
 class DatabaseTests(unittest.TestCase):
@@ -458,6 +529,88 @@ class DatabaseTests(unittest.TestCase):
                     {"year": 2025, "month": 12, "count": 1},
                 ],
             )
+
+    def test_originals_only_include_posts_authored_by_the_account(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("example")
+            db.update_profile(
+                account["id"],
+                {
+                    "id": "42",
+                    "username": "example",
+                    "display_name": "Example",
+                },
+                None,
+                None,
+            )
+            original = sample_tweet("210", "own original")
+            reply = sample_tweet("211", "own reply")
+            reply.update({"is_reply": True, "reply_to_id": "212"})
+            foreign_parent = sample_tweet("212", "foreign parent")
+            foreign_parent.update(
+                {"author_id": "99", "author_username": "other", "author_name": "Other"}
+            )
+            reused_handle = sample_tweet("213", "same handle, different X user ID")
+            reused_handle["author_id"] = "100"
+            db.insert_tweets(
+                account["id"], [original, reply, foreign_parent, reused_handle]
+            )
+
+            page = db.list_tweets(account["id"], kind="originals")
+
+            self.assertEqual([item["id"] for item in page["items"]], ["210"])
+
+    def test_media_only_includes_owned_media_and_hides_reply_parent_media(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("example")
+            db.update_profile(
+                account["id"],
+                {
+                    "id": "42",
+                    "username": "example",
+                    "display_name": "Example",
+                },
+                None,
+                None,
+            )
+
+            def attach_photo(tweet: dict, key: str) -> dict:
+                tweet["media"] = [
+                    {
+                        "key": key,
+                        "type": "photo",
+                        "url": f"https://pbs.twimg.com/media/{key}.jpg",
+                    }
+                ]
+                return tweet
+
+            parent = attach_photo(sample_tweet("220", "foreign parent"), "parent-photo")
+            parent.update(
+                {"author_id": "99", "author_username": "other", "author_name": "Other"}
+            )
+            reply = attach_photo(sample_tweet("221", "own reply media"), "reply-photo")
+            reply.update(
+                {
+                    "is_reply": True,
+                    "reply_to_id": "220",
+                    "reply_to_username": "other",
+                }
+            )
+            repost = attach_photo(sample_tweet("222", "reposted media"), "repost-photo")
+            repost["is_repost"] = True
+            original = attach_photo(sample_tweet("223", "own original media"), "own-photo")
+            db.insert_tweets(account["id"], [parent, reply, repost, original])
+
+            page = db.list_tweets(account["id"], kind="media")
+            items = {item["id"]: item for item in page["items"]}
+
+            self.assertEqual(set(items), {"221", "223"})
+            self.assertEqual(len(items["221"]["media"]), 1)
+            self.assertEqual(items["221"]["media"][0]["type"], "photo")
+            self.assertEqual(items["221"]["repliedTo"]["id"], "220")
+            self.assertEqual(items["221"]["repliedTo"]["media"], [])
 
     def test_tweet_uses_its_own_author_avatar_and_reply_target(self):
         with tempfile.TemporaryDirectory() as directory:

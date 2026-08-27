@@ -414,6 +414,20 @@ class FreeXScraper:
     @classmethod
     def _tweet_to_dict(cls, tweet: Any) -> dict[str, Any]:
         quoted = tweet.quotedTweet
+        reply_to_id = str(tweet.inReplyToTweetId) if tweet.inReplyToTweetId else None
+        reply_to_username = (
+            tweet.inReplyToUser.username
+            if tweet.inReplyToUser is not None
+            else tweet.inReplyToScreenName
+        )
+        is_reply = bool(
+            reply_to_id
+            or reply_to_username
+            or (
+                tweet.conversationId
+                and str(tweet.conversationId) != str(tweet.id)
+            )
+        )
         links = []
         for link in tweet.links or []:
             links.append(
@@ -431,14 +445,10 @@ class FreeXScraper:
             "text": tweet.rawContent,
             "created_at": created,
             "conversation_id": str(tweet.conversationId),
-            "reply_to_id": str(tweet.inReplyToTweetId) if tweet.inReplyToTweetId else None,
-            "reply_to_username": (
-                tweet.inReplyToUser.username
-                if tweet.inReplyToUser is not None
-                else tweet.inReplyToScreenName
-            ),
+            "reply_to_id": reply_to_id,
+            "reply_to_username": reply_to_username,
             "lang": tweet.lang,
-            "is_reply": tweet.inReplyToTweetId is not None,
+            "is_reply": is_reply,
             "is_repost": tweet.retweetedTweet is not None,
             "is_quote": quoted is not None,
             "possibly_sensitive": bool(tweet.possibly_sensitive),

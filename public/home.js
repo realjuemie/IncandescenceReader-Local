@@ -71,8 +71,9 @@ function renderMemberStatus(status) {
   const container = $("#home-member-status");
   container.replaceChildren();
   if (status.authenticated && status.member) {
-    const name = document.createElement("span");
-    name.textContent = `会员 ${status.member.username}`;
+    const identity = window.MemberNotifications.createIdentityButton(
+      status.member, api, showToast,
+    );
     const logout = document.createElement("button");
     logout.type = "button";
     logout.className = "member-status-action";
@@ -82,7 +83,7 @@ function renderMemberStatus(status) {
       await loadDirectory();
     });
     const notifications = window.MemberNotifications.createButton(api, showToast);
-    container.append(name, notifications, logout);
+    container.append(identity, notifications, logout);
   } else {
     const login = document.createElement("a");
     login.href = "/login?redirect=%2F";
