@@ -407,6 +407,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/admin/sync-all":
                 self._json(asyncio.run(self.app.sync_service.sync_all(reason="manual-all")))
                 return
+            if path == "/api/admin/sync-failed":
+                self._json(
+                    asyncio.run(self.app.sync_service.sync_failed(reason="manual-failed"))
+                )
+                return
             match = re.fullmatch(r"/api/admin/accounts/(\d+)/sync", path)
             if match:
                 result = asyncio.run(

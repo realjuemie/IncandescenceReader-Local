@@ -394,6 +394,8 @@ body.lightbox-open { overflow: hidden; }
 .sync-failure-panel h2 { margin: 3px 0 4px; color: var(--danger); font-size: 21px; }
 .sync-failure-panel header p { margin: 0; color: #7d3038; font-size: var(--text-small); line-height: 1.55; }
 .sync-failure-count { flex-shrink: 0; padding: 6px 10px; border-radius: 999px; color: var(--danger); background: #fff; font-size: var(--text-caption); font-weight: 750; }
+.sync-failure-actions { display: flex; flex-shrink: 0; align-items: center; gap: 9px; }
+.sync-failure-actions .primary-button { min-height: 38px; white-space: nowrap; }
 .sync-failure-list { display: grid; gap: 8px; }
 .sync-failure-item { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 12px; border: 1px solid rgba(211,45,58,.2); border-radius: 12px; background: rgba(255,255,255,.86); }
 .sync-failure-marker { width: 34px; height: 34px; display: grid; place-items: center; border-radius: 50%; color: #fff; background: var(--danger); font-size: 20px; font-weight: 850; }
@@ -592,6 +594,8 @@ body.lightbox-open { overflow: hidden; }
   .admin-panel-heading h2 { font-size: 20px; }
   .sync-failure-panel { padding: 15px; }
   .sync-failure-panel > header { align-items: flex-start; flex-direction: column; gap: 9px; }
+  .sync-failure-actions { width: 100%; align-items: stretch; flex-direction: column; }
+  .sync-failure-actions .primary-button { width: 100%; }
   .sync-failure-item { grid-template-columns: 32px minmax(0, 1fr); align-items: start; gap: 10px; }
   .sync-failure-marker { width: 32px; height: 32px; }
   .sync-failure-retry { width: 100%; grid-column: 2; }

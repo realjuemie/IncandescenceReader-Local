@@ -98,6 +98,7 @@ class SyncService:
                 "reason": reason,
                 "fetched": len(result["tweets"]) - int(result.get("replyContextCount") or 0),
                 "replyContextsFetched": int(result.get("replyContextCount") or 0),
+                "replyContextsDeferred": int(result.get("replyContextsDeferred") or 0),
                 "inserted": inserted,
                 "mediaDownloaded": media_result["downloaded"],
                 "mediaFailed": media_result["failed"],
@@ -228,8 +229,21 @@ class SyncService:
         }
 
     async def sync_all(self, reason: str = "manual-all") -> dict[str, Any]:
+        return await self._sync_accounts(self.database.list_accounts(), reason=reason)
+
+    async def sync_failed(self, reason: str = "manual-failed") -> dict[str, Any]:
+        accounts = [
+            account
+            for account in self.database.list_accounts()
+            if str(account.get("last_error") or "").strip()
+        ]
+        return await self._sync_accounts(accounts, reason=reason)
+
+    async def _sync_accounts(
+        self, accounts: list[dict[str, Any]], *, reason: str
+    ) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
-        for account in self.database.list_accounts():
+        for account in accounts:
             try:
                 results.append(await self.sync_account(account["id"], reason=reason))
             except SyncBusyError:

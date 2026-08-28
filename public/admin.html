@@ -7,7 +7,7 @@
   <title>X拾光 · 管理后台</title>
   <link rel="icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
   <link rel="shortcut icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=4.13.1">
+  <link rel="stylesheet" href="/styles.css?v=4.14.0">
 </head>
 <body class="admin-body">
   <main class="admin-auth-view" id="auth-view">
@@ -73,7 +73,10 @@
             <h2>抓取异常</h2>
             <p>以下账号最近一次更新失败。这里会保留具体原因，更新成功后自动移除。</p>
           </div>
-          <span class="sync-failure-count" id="sync-failure-count"></span>
+          <div class="sync-failure-actions">
+            <span class="sync-failure-count" id="sync-failure-count"></span>
+            <button type="button" class="primary-button" id="retry-failed">↻ 一键重试失败账号</button>
+          </div>
         </header>
         <div class="sync-failure-list" id="sync-failure-list"></div>
       </section>
@@ -227,7 +230,7 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/i18n.js?v=4.13.1" defer></script>
-  <script src="/admin.js?v=4.13.1" defer></script>
+  <script src="/i18n.js?v=4.14.0" defer></script>
+  <script src="/admin.js?v=4.14.0" defer></script>
 </body>
 </html>

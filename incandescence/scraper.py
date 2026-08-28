@@ -327,8 +327,20 @@ class FreeXScraper:
             str(self.session_db),
             proxy=self._proxy(),
             raise_when_no_account=True,
-            wait_timeout=20,
+            # Give the essential profile/timeline queues a little time to recover
+            # from a brief in-use lock without waiting indefinitely for a real
+            # rate-limit reset.
+            wait_timeout=35,
             wait_interval=1,
+        )
+        detail_api = API(
+            str(self.session_db),
+            proxy=self._proxy(),
+            raise_when_no_account=True,
+            # Reply parents are useful context, but must never hold up or fail the
+            # monitored account's own timeline when TweetDetail is rate-limited.
+            wait_timeout=2,
+            wait_interval=0.5,
         )
         try:
             user = await api.user_by_login(username)
@@ -369,14 +381,20 @@ class FreeXScraper:
                     ]
                     + [str(value) for value in (reply_context_ids or []) if str(value)]
                 )
-            )[:50]
-            for parent_id in parent_ids:
+            )
+            # Resolve new reply parents first and gradually backfill older missing
+            # context. A single credential has a much smaller TweetDetail budget
+            # than timeline budget, so a large batch starves later accounts.
+            parent_ids = parent_ids[:6]
+            deferred_reply_contexts = 0
+            for index, parent_id in enumerate(parent_ids):
                 if parent_id in primary_ids:
                     continue
                 try:
-                    parent = await api.tweet_details(int(parent_id))
+                    parent = await detail_api.tweet_details(int(parent_id))
                 except NoAccountError:
-                    raise
+                    deferred_reply_contexts = len(parent_ids) - index
+                    break
                 except Exception:
                     # A deleted, private, or temporarily unavailable parent must not
                     # prevent the monitored account's own reply from being archived.
@@ -393,9 +411,15 @@ class FreeXScraper:
                 "profile": self._user_to_dict(user),
                 "tweets": tweets,
                 "replyContextCount": len(reply_contexts),
+                "replyContextsDeferred": deferred_reply_contexts,
                 "newestSeenId": str(newest_seen) if newest_seen is not None else last_tweet_id,
             }
         except NoAccountError as error:
+            sessions = await api.pool.accounts_info()
+            if any(bool(item.get("active")) and bool(item.get("logged_in")) for item in sessions):
+                raise RuntimeError(
+                    "X 主时间线请求额度暂时耗尽，请稍后重试失败账号"
+                ) from error
             raise RuntimeError("没有可用的 X 登录会话，请在设置中添加 Cookie") from error
 
     async def lookup_users(self, usernames: list[str]) -> list[dict[str, Any]]:

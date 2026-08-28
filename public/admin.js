@@ -71,6 +71,7 @@ function bindEvents() {
   $("#test-bark").addEventListener("click", testBark);
   $("#clear-bark-key").addEventListener("click", clearBarkKey);
   $("#sync-all").addEventListener("click", syncAll);
+  $("#retry-failed").addEventListener("click", syncFailed);
 }
 
 function showAuth(setupRequired) {
@@ -153,7 +154,7 @@ function renderDashboard() {
 function describeSyncError(value) {
   const detail = String(value || t("syncFailed")).trim() || t("syncFailed");
   let summary = detail;
-  if (/rate.?limit|too many requests|\b429\b/i.test(detail)) {
+  if (/rate.?limit|too many requests|请求额度|频率受限|\b429\b/i.test(detail)) {
     summary = t("rateLimited");
   } else if (/timeout|timed out/i.test(detail)) {
     summary = t("xTimeout");
@@ -177,6 +178,7 @@ function renderSyncFailures() {
   list.replaceChildren();
   if (!failures.length) return;
   $("#sync-failure-count").textContent = t("failuresNeedAction", { count: failures.length });
+  $("#retry-failed").disabled = Boolean(state.health?.sync?.running);
   for (const account of failures) {
     const item = document.createElement("article");
     item.className = "sync-failure-item";
@@ -1049,6 +1051,32 @@ async function syncAll() {
     );
   } catch (error) { showToast(error.message, true); }
   finally { button.disabled = false; }
+}
+
+async function syncFailed() {
+  const failuresBeforeRetry = state.accounts.filter((account) => account.lastError);
+  if (!failuresBeforeRetry.length) return;
+  const button = $("#retry-failed");
+  const originalLabel = button.textContent;
+  button.disabled = true;
+  button.textContent = t("retryingFailed", { count: failuresBeforeRetry.length });
+  try {
+    const result = await api("/api/admin/sync-failed", { method: "POST", body: {} });
+    const failures = result.results.filter((item) => item.error);
+    const failedAccounts = failures.map((item) => `@${item.username || item.accountId}`).join(i18n.locale === "en" ? ", " : "、");
+    await loadDashboard();
+    showToast(
+      failures.length
+        ? t("retryFailedResult", { ok: result.succeeded, failed: result.failed, accounts: failedAccounts })
+        : t("retryFailedDone", { ok: result.succeeded }),
+      failures.length > 0,
+    );
+  } catch (error) {
+    showToast(error.message, true);
+  } finally {
+    button.textContent = originalLabel;
+    button.disabled = false;
+  }
 }
 
 async function refreshStatus() {

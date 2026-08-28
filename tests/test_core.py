@@ -575,6 +575,64 @@ class ScraperMappingTests(unittest.TestCase):
         self.assertEqual(mapped["300"]["author_username"], "other")
         self.assertEqual(mapped["301"]["reply_to_id"], "300")
 
+    def test_reply_context_rate_limit_does_not_fail_primary_timeline(self):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+        monitored = SimpleNamespace(
+            id="42", username="monitored", displayname="Monitored",
+            rawDescription="", profileImageUrl=None, profileBannerUrl=None,
+            protected=False, verified=False, blue=False, followersCount=1,
+            friendsCount=2, statusesCount=3, mediaCount=0,
+        )
+        other = SimpleNamespace(
+            id="99", username="other", displayname="Other", profileImageUrl=None,
+        )
+        reply = SimpleNamespace(
+            id="301", user=monitored, rawContent="@other reply",
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc), conversationId="300",
+            inReplyToTweetId="300", inReplyToUser=other,
+            inReplyToScreenName="other", lang="zh", retweetedTweet=None,
+            quotedTweet=None, possibly_sensitive=False, replyCount=0,
+            retweetCount=0, likeCount=0, quoteCount=0, bookmarkedCount=0,
+            viewCount=0, links=[], url="https://x.com/monitored/status/301",
+            media=media,
+        )
+
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakeAPI:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def user_by_login(self, username):
+                return monitored
+
+            async def user_tweets_and_replies(self, user_id, limit=-1):
+                yield reply
+
+            async def user_tweets(self, user_id, limit=-1):
+                yield reply
+
+            async def tweet_details(self, tweet_id):
+                raise NoAccountError("TweetDetail is rate-limited")
+
+        class RateLimitedContextScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return FakeAPI, NoAccountError
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                RateLimitedContextScraper(Path(directory) / "sessions.db").fetch_latest(
+                    username="monitored", last_tweet_id=None, include_replies=True,
+                    include_reposts=False, initial_limit=20, incremental_limit=20,
+                )
+            )
+
+        self.assertEqual([item["id"] for item in result["tweets"]], ["301"])
+        self.assertEqual(result["replyContextCount"], 0)
+        self.assertEqual(result["replyContextsDeferred"], 1)
+
 
 class DatabaseTests(unittest.TestCase):
     def test_tweet_pagination_and_duplicate_insert(self):
@@ -1136,6 +1194,24 @@ class SyncTests(unittest.TestCase):
             failed = db.get_account(account["id"])
             self.assertEqual(failed["last_error"], "Could not find user")
             self.assertIsNotNone(failed["last_sync_failed_at"])
+
+    def test_sync_failed_only_retries_accounts_with_unresolved_errors(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = Database(root / "reader.db")
+            healthy = db.create_account("healthy")
+            failed = db.create_account("failed")
+            db.mark_sync_failed(failed["id"], "temporary rate limit")
+            scraper = FakeScraper()
+            service = SyncService(db, ConfigStore(root), scraper, FakeMedia())
+
+            result = asyncio.run(service.sync_failed())
+
+            self.assertEqual(result["succeeded"], 1)
+            self.assertEqual(result["failed"], 0)
+            self.assertEqual([item["accountId"] for item in result["results"]], [failed["id"]])
+            self.assertIsNone(db.get_account(failed["id"])["last_error"])
+            self.assertIsNone(db.get_account(healthy["id"])["last_synced_at"])
 
     def test_invalid_credential_bark_alert_is_deduplicated(self):
         with tempfile.TemporaryDirectory() as directory:
