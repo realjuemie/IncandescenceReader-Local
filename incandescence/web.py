@@ -61,6 +61,13 @@ class Application:
             metrics = json.loads(account.get("public_metrics_json") or "{}")
         except json.JSONDecodeError:
             metrics = {}
+        # Database-backed account payloads always include last_content_at. Keep
+        # the fallback only for callers that construct legacy account dicts.
+        last_content_at = (
+            account.get("last_content_at")
+            if "last_content_at" in account
+            else account.get("last_synced_at")
+        )
         result = {
             "id": account["id"],
             "username": account["username"],
@@ -73,7 +80,7 @@ class Application:
             "isPublic": bool(account.get("is_public", 1)),
             "metrics": metrics,
             "trackingStartedAt": account.get("created_at"),
-            "lastSyncedAt": account.get("last_synced_at"),
+            "lastSyncedAt": last_content_at,
             "tweetCount": account.get("tweet_count", 0),
             "mediaCount": account.get("media_count", 0),
             "newestTweetAt": account.get("newest_tweet_at"),

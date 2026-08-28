@@ -574,6 +574,30 @@ class DatabaseTests(unittest.TestCase):
             self.assertIsNone(recovered["last_error"])
             self.assertIsNone(recovered["last_sync_failed_at"])
 
+    def test_public_update_time_only_tracks_newly_inserted_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("example")
+            db.insert_tweets(account["id"], [sample_tweet("204", "new content")])
+            content_time = db.get_account(account["id"])["last_content_at"]
+            self.assertIsNotNone(content_time)
+
+            # A later successful scan with no inserted tweets must not make the
+            # public page look as if the account received new content.
+            with db.connection() as connection:
+                connection.execute(
+                    "UPDATE accounts SET last_synced_at = ? WHERE id = ?",
+                    ("2099-01-01T00:00:00Z", account["id"]),
+                )
+                connection.commit()
+
+            listed = db.list_accounts()[0]
+            self.assertEqual(listed["last_content_at"], content_time)
+            self.assertEqual(
+                Application.account_public(object(), listed)["lastSyncedAt"],
+                content_time,
+            )
+
     def test_tweets_can_be_filtered_by_year_and_month(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(Path(directory) / "reader.db")

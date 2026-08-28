@@ -206,7 +206,13 @@ class Database:
 
     def get_account(self, account_id: int) -> dict[str, Any]:
         with self.connection() as db:
-            row = db.execute("SELECT * FROM accounts WHERE id = ?", (account_id,)).fetchone()
+            row = db.execute(
+                """SELECT a.*,
+                          (SELECT MAX(t.synced_at) FROM tweets t
+                           WHERE t.account_id = a.id) AS last_content_at
+                   FROM accounts a WHERE a.id = ?""",
+                (account_id,),
+            ).fetchone()
         if not row:
             raise KeyError("账号不存在")
         return dict(row)
@@ -230,6 +236,7 @@ class Database:
                 SELECT a.*,
                        COUNT(t.id) AS tweet_count,
                        MAX(t.created_at) AS newest_tweet_at,
+                       MAX(t.synced_at) AS last_content_at,
                        (SELECT COUNT(*) FROM media m
                         JOIN tweets mt ON mt.id = m.tweet_id
                         WHERE mt.account_id = a.id AND m.local_path IS NOT NULL) AS media_count,
