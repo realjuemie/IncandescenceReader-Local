@@ -156,6 +156,7 @@ function createAccountCard(account) {
   meta.innerHTML = `<span><strong>${formatCount(account.tweetCount || 0)}</strong> 条内容</span><span><strong>${formatCount(account.mediaCount || 0)}</strong> 个媒体</span>`;
   const updated = document.createElement("div");
   updated.className = "home-card-updated";
+  updated.classList.toggle("empty", !account.lastSyncedAt);
   updated.textContent = account.lastSyncedAt ? `最近更新 ${relativeTime(account.lastSyncedAt)}` : "尚未完成首次更新";
   const actions = document.createElement("div");
   actions.className = "home-card-actions";
