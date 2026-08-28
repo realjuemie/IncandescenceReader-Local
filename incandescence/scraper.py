@@ -20,6 +20,27 @@ os.environ.setdefault("TWS_RAISE_WHEN_NO_ACCOUNT", "1")
 os.environ.setdefault("TWS_TELEMETRY", "0")
 
 
+
+NO_SESSION_MESSAGE = "没有可用的 X 登录会话，请在设置中添加 Cookie"
+RATE_LIMIT_MESSAGE = "X 请求额度暂时耗尽或会话被短暂锁定，Cookie 仍有效，请稍后再试"
+PROTECTED_UNFOLLOWED_MESSAGE = "是私密账号，当前 Cookie 都未关注，无法读取时间线"
+
+
+def describe_no_account(sessions: list[dict[str, Any]] | None) -> str:
+    """Map twscrape NoAccountError to a user-facing reason.
+
+    An empty pool really has no Cookie. Any saved session — even one X just
+    403-locked — still has credentials; the caller should wait, not re-paste.
+    """
+    if sessions:
+        return RATE_LIMIT_MESSAGE
+    return NO_SESSION_MESSAGE
+
+
+def is_rate_limit_message(text: str) -> bool:
+    message = str(text or "")
+    return "额度暂时耗尽" in message or "会话被短暂锁定" in message
+
 class ScraperUnavailableError(RuntimeError):
     pass
 
@@ -109,11 +130,9 @@ class FreeXScraper:
             for item in sessions:
                 label = str(item.get("label") or "")
                 state = metadata.setdefault(label, {})
-                invalid = (
-                    item.get("credentialState") == "invalid"
-                    or not bool(item.get("active"))
-                    or not bool(item.get("loggedIn"))
-                )
+                # Rate-limit 403 makes twscrape flip loggedIn/active; that is
+                # not a dead Cookie. Only explicit validation failures alert.
+                invalid = item.get("credentialState") == "invalid"
                 if not invalid:
                     if state.pop("invalidAlertSent", None) is not None:
                         changed = True
@@ -311,6 +330,107 @@ class FreeXScraper:
         )
         temporary.replace(self.metadata_path)
 
+
+    async def _collect_visible_tweets(
+        self,
+        api: Any,
+        user: Any,
+        *,
+        limit: int,
+        last_tweet_id: str | None,
+        include_replies: bool,
+        include_reposts: bool,
+    ) -> dict[str, Any]:
+        generator = (
+            api.user_tweets_and_replies(user.id, limit=limit)
+            if include_replies
+            else api.user_tweets(user.id, limit=limit)
+        )
+        tweets: list[dict[str, Any]] = []
+        saw_any = False
+        newest_seen: int | None = int(last_tweet_id) if last_tweet_id else None
+        boundary = int(last_tweet_id) if last_tweet_id else None
+        old_streak = 0
+        async with aclosing(generator) as stream:
+            async for tweet in stream:
+                saw_any = True
+                tweet_id = int(tweet.id)
+                newest_seen = max(newest_seen or tweet_id, tweet_id)
+                if boundary is not None and tweet_id <= boundary:
+                    old_streak += 1
+                    if old_streak >= 10:
+                        break
+                    continue
+                old_streak = 0
+                if tweet.retweetedTweet is not None and not include_reposts:
+                    continue
+                tweets.append(self._tweet_to_dict(tweet))
+        return {"tweets": tweets, "saw_any": saw_any, "newest_seen": newest_seen}
+
+    def _cookie_header_from_account(self, account: Any) -> str:
+        cookies = getattr(account, "cookies", None)
+        if isinstance(cookies, dict):
+            return canonical_cookie_header(cookies)
+        text = str(cookies or "").strip()
+        if not text:
+            return ""
+        try:
+            parsed = extract_session_cookies(text)
+        except Exception:
+            return text
+        return canonical_cookie_header(parsed) if parsed else text
+
+    async def _collect_protected_via_other_sessions(
+        self,
+        pool_api: Any,
+        *,
+        username: str,
+        user: Any,
+        limit: int,
+        last_tweet_id: str | None,
+        include_replies: bool,
+        include_reposts: bool,
+        NoAccountError: type[BaseException],
+        API: Any,
+    ) -> tuple[Any, dict[str, Any]] | None:
+        try:
+            accounts = await pool_api.pool.get_all()
+        except Exception:
+            accounts = []
+        for account in accounts:
+            header = self._cookie_header_from_account(account)
+            if not header:
+                continue
+            label = str(getattr(account, "username", "") or "viewer")
+            try:
+                with tempfile.TemporaryDirectory(prefix="incandescence-protected-") as directory:
+                    isolated = API(
+                        str(Path(directory) / "sessions.db"),
+                        proxy=self._proxy(),
+                        raise_when_no_account=True,
+                        wait_timeout=15,
+                        wait_interval=1,
+                    )
+                    await isolated.pool.add_account_cookies(label, header)
+                    isolated_user = await isolated.user_by_login(username)
+                    if isolated_user is None:
+                        continue
+                    collected = await self._collect_visible_tweets(
+                        isolated,
+                        isolated_user,
+                        limit=limit,
+                        last_tweet_id=last_tweet_id,
+                        include_replies=include_replies,
+                        include_reposts=include_reposts,
+                    )
+                    if collected["saw_any"]:
+                        return isolated_user, collected
+            except NoAccountError:
+                continue
+            except Exception:
+                continue
+        return None
+
     async def fetch_latest(
         self,
         *,
@@ -347,29 +467,32 @@ class FreeXScraper:
             if user is None:
                 raise ValueError(f"找不到账号 @{username}")
             limit = initial_limit if not last_tweet_id else incremental_limit
-            generator = (
-                api.user_tweets_and_replies(user.id, limit=limit)
-                if include_replies
-                else api.user_tweets(user.id, limit=limit)
+            collected = await self._collect_visible_tweets(
+                api,
+                user,
+                limit=limit,
+                last_tweet_id=last_tweet_id,
+                include_replies=include_replies,
+                include_reposts=include_reposts,
             )
-            tweets: list[dict[str, Any]] = []
-            old_streak = 0
-            newest_seen: int | None = int(last_tweet_id) if last_tweet_id else None
-            boundary = int(last_tweet_id) if last_tweet_id else None
-            async with aclosing(generator) as stream:
-                async for tweet in stream:
-                    tweet_id = int(tweet.id)
-                    newest_seen = max(newest_seen or tweet_id, tweet_id)
-                    if boundary is not None and tweet_id <= boundary:
-                        old_streak += 1
-                        # 旧置顶推文有时排在最前面；连续遇到十条旧记录才停止。
-                        if old_streak >= 10:
-                            break
-                        continue
-                    old_streak = 0
-                    if tweet.retweetedTweet is not None and not include_reposts:
-                        continue
-                    tweets.append(self._tweet_to_dict(tweet))
+            if bool(getattr(user, "protected", False)) and not collected["saw_any"]:
+                fallback = await self._collect_protected_via_other_sessions(
+                    api,
+                    username=username,
+                    user=user,
+                    limit=limit,
+                    last_tweet_id=last_tweet_id,
+                    include_replies=include_replies,
+                    include_reposts=include_reposts,
+                    NoAccountError=NoAccountError,
+                    API=API,
+                )
+                if fallback is not None:
+                    user, collected = fallback
+                else:
+                    raise RuntimeError(f"@{username} {PROTECTED_UNFOLLOWED_MESSAGE}")
+            tweets = collected["tweets"]
+            newest_seen = collected["newest_seen"]
             primary_ids = {str(item["id"]) for item in tweets}
             reply_contexts: list[dict[str, Any]] = []
             parent_ids = list(
@@ -416,11 +539,7 @@ class FreeXScraper:
             }
         except NoAccountError as error:
             sessions = await api.pool.accounts_info()
-            if any(bool(item.get("active")) and bool(item.get("logged_in")) for item in sessions):
-                raise RuntimeError(
-                    "X 主时间线请求额度暂时耗尽，请稍后重试失败账号"
-                ) from error
-            raise RuntimeError("没有可用的 X 登录会话，请在设置中添加 Cookie") from error
+            raise RuntimeError(describe_no_account(sessions)) from error
 
     async def lookup_users(self, usernames: list[str]) -> list[dict[str, Any]]:
         """Resolve a bounded set of author profiles for local avatar backfilling."""
@@ -444,7 +563,8 @@ class FreeXScraper:
                 if user is not None:
                     results.append(self._user_to_dict(user))
         except NoAccountError as error:
-            raise RuntimeError("没有可用的 X 登录会话，请在设置中添加 Cookie") from error
+            sessions = await api.pool.accounts_info()
+            raise RuntimeError(describe_no_account(sessions)) from error
         return results
 
     @staticmethod

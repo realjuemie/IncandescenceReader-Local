@@ -11,3 +11,11 @@ coverage/
 .tmp-admin-test-*/
 .tmp-member-test-*/
 .tmp-bark-test-*/
+*.bak
+*.bak.*
+*.py.bak*
+scraper-sessions.db
+scraper-session-meta.json
+settings.json
+admin-auth.json
+.push.sh

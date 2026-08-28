@@ -13,7 +13,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "scheduleEnabled": False,
     "scheduleMinutes": 30,
     "initialFetchLimit": 100,
-    "incrementalScanLimit": 500,
+    "incrementalScanLimit": 80,
     "mediaConcurrency": 3,
     "maxMediaMb": 250,
     "proxyEnabled": False,
@@ -83,7 +83,7 @@ class ConfigStore:
             "scheduleMinutes": _bounded_int(data.get("scheduleMinutes"), 30, 5, 10080),
             "initialFetchLimit": _bounded_int(data.get("initialFetchLimit"), 100, 20, 500),
             "incrementalScanLimit": _bounded_int(
-                data.get("incrementalScanLimit"), 500, 40, 3200
+                data.get("incrementalScanLimit"), 80, 40, 3200
             ),
             "mediaConcurrency": _bounded_int(data.get("mediaConcurrency"), 3, 1, 6),
             "maxMediaMb": _bounded_int(data.get("maxMediaMb"), 250, 10, 2000),

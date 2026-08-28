@@ -575,6 +575,211 @@ class ScraperMappingTests(unittest.TestCase):
         self.assertEqual(mapped["300"]["author_username"], "other")
         self.assertEqual(mapped["301"]["reply_to_id"], "300")
 
+
+
+    def test_protected_account_empty_timeline_is_not_success(self):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+        monitored = SimpleNamespace(
+            id="42", username="secretuser", displayname="Secret",
+            rawDescription="", profileImageUrl=None, profileBannerUrl=None,
+            protected=True, verified=False, blue=False, followersCount=1,
+            friendsCount=2, statusesCount=12, mediaCount=0,
+        )
+
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakePool:
+            async def get_all(self):
+                return []
+
+            async def accounts_info(self):
+                return []
+
+        class BlindAPI:
+            def __init__(self, *args, **kwargs):
+                self.pool = FakePool()
+
+            async def user_by_login(self, username):
+                return monitored
+
+            async def user_tweets_and_replies(self, user_id, limit=-1):
+                if False:
+                    yield None
+
+            async def user_tweets(self, user_id, limit=-1):
+                if False:
+                    yield None
+
+        class BlindScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return BlindAPI, NoAccountError
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError) as raised:
+                asyncio.run(
+                    BlindScraper(Path(directory) / "sessions.db").fetch_latest(
+                        username="secretuser",
+                        last_tweet_id=None,
+                        include_replies=True,
+                        include_reposts=False,
+                        initial_limit=20,
+                        incremental_limit=20,
+                    )
+                )
+        self.assertIn("私密账号", str(raised.exception))
+        self.assertIn("未关注", str(raised.exception))
+
+    def test_protected_account_tries_other_cookie_instead_of_empty_success(self):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+        monitored = SimpleNamespace(
+            id="42", username="secretuser", displayname="Secret",
+            rawDescription="", profileImageUrl=None, profileBannerUrl=None,
+            protected=True, verified=False, blue=False, followersCount=1,
+            friendsCount=2, statusesCount=12, mediaCount=0,
+        )
+        visible = SimpleNamespace(
+            id="99", user=monitored, rawContent="secret tweet",
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc), conversationId="99",
+            inReplyToTweetId=None, inReplyToUser=None, inReplyToScreenName=None,
+            lang="zh", retweetedTweet=None, quotedTweet=None, possibly_sensitive=False,
+            replyCount=0, retweetCount=0, likeCount=0, quoteCount=0,
+            bookmarkedCount=0, viewCount=0, links=[],
+            url="https://x.com/secretuser/status/99", media=media,
+        )
+
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakePool:
+            async def get_all(self):
+                return [SimpleNamespace(username="viewer-b", cookies={"auth_token": "t", "ct0": "c"})]
+
+            async def add_account_cookies(self, *args, **kwargs):
+                return None
+
+            async def accounts_info(self):
+                return [{"username": "viewer-b"}]
+
+        class SwitchingAPI:
+            timeline_calls = 0
+
+            def __init__(self, *args, **kwargs):
+                self.pool = FakePool()
+
+            async def user_by_login(self, username):
+                return monitored
+
+            async def user_tweets_and_replies(self, user_id, limit=-1):
+                SwitchingAPI.timeline_calls += 1
+                if SwitchingAPI.timeline_calls == 1:
+                    if False:
+                        yield None
+                    return
+                yield visible
+
+            async def user_tweets(self, user_id, limit=-1):
+                if False:
+                    yield None
+
+            async def tweet_details(self, tweet_id):
+                return None
+
+        class SwitchingScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return SwitchingAPI, NoAccountError
+
+        SwitchingAPI.timeline_calls = 0
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                SwitchingScraper(Path(directory) / "sessions.db").fetch_latest(
+                    username="secretuser",
+                    last_tweet_id=None,
+                    include_replies=True,
+                    include_reposts=False,
+                    initial_limit=20,
+                    incremental_limit=20,
+                )
+            )
+        self.assertEqual([item["id"] for item in result["tweets"]], ["99"])
+        self.assertGreaterEqual(SwitchingAPI.timeline_calls, 2)
+
+    def test_no_account_with_saved_session_is_rate_limit_not_missing_cookie(self):
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakePool:
+            def __init__(self, sessions):
+                self._sessions = sessions
+
+            async def accounts_info(self):
+                return self._sessions
+
+        class LockedAPI:
+            def __init__(self, *args, **kwargs):
+                self.pool = FakePool(
+                    [{"username": "session-1", "active": True, "logged_in": False}]
+                )
+
+            async def user_by_login(self, username):
+                raise NoAccountError("No account available for queue")
+
+        class LockedScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return LockedAPI, NoAccountError
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError) as raised:
+                asyncio.run(
+                    LockedScraper(Path(directory) / "sessions.db").fetch_latest(
+                        username="monitored",
+                        last_tweet_id="1",
+                        include_replies=True,
+                        include_reposts=False,
+                        initial_limit=20,
+                        incremental_limit=20,
+                    )
+                )
+        self.assertIn("Cookie 仍有效", str(raised.exception))
+        self.assertNotIn("请在设置中添加 Cookie", str(raised.exception))
+
+    def test_no_account_without_any_session_asks_for_cookie(self):
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakePool:
+            async def accounts_info(self):
+                return []
+
+        class EmptyAPI:
+            def __init__(self, *args, **kwargs):
+                self.pool = FakePool()
+
+            async def user_by_login(self, username):
+                raise NoAccountError("No account available")
+
+        class EmptyScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return EmptyAPI, NoAccountError
+
+        with tempfile.TemporaryDirectory() as directory:
+            with self.assertRaises(RuntimeError) as raised:
+                asyncio.run(
+                    EmptyScraper(Path(directory) / "sessions.db").fetch_latest(
+                        username="monitored",
+                        last_tweet_id=None,
+                        include_replies=False,
+                        include_reposts=False,
+                        initial_limit=20,
+                        incremental_limit=20,
+                    )
+                )
+        self.assertIn("请在设置中添加 Cookie", str(raised.exception))
+
     def test_reply_context_rate_limit_does_not_fail_primary_timeline(self):
         media = SimpleNamespace(photos=[], videos=[], animated=[])
         monitored = SimpleNamespace(
@@ -1194,6 +1399,35 @@ class SyncTests(unittest.TestCase):
             failed = db.get_account(account["id"])
             self.assertEqual(failed["last_error"], "Could not find user")
             self.assertIsNotNone(failed["last_sync_failed_at"])
+
+
+    def test_sync_all_skips_remaining_after_rate_limit(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            db = Database(root / "reader.db")
+            first = db.create_account("alpha")
+            second = db.create_account("beta")
+            third = db.create_account("gamma")
+
+            class QuotaScraper:
+                async def fetch_latest(self, **kwargs):
+                    raise RuntimeError("X 请求额度暂时耗尽或会话被短暂锁定，Cookie 仍有效，请稍后再试")
+
+                async def pending_invalid_session_alerts(self):
+                    return []
+
+            service = SyncService(db, ConfigStore(root), QuotaScraper(), FakeMedia())
+            service.account_sync_gap_seconds = 0
+            result = asyncio.run(service.sync_all())
+            self.assertEqual(result["failed"], 3)
+            self.assertEqual(result["succeeded"], 0)
+            errors = [item["error"] for item in result["results"]]
+            self.assertIn("Cookie 仍有效", errors[0])
+            self.assertEqual(errors[1], "已跳过：抓取额度已用尽，等待解锁后再试")
+            self.assertEqual(errors[2], "已跳过：抓取额度已用尽，等待解锁后再试")
+            self.assertEqual(db.get_account(first["id"])["last_error"], errors[0])
+            self.assertIsNone(db.get_account(second["id"])["last_error"])
+            self.assertIsNone(db.get_account(third["id"])["last_error"])
 
     def test_sync_failed_only_retries_accounts_with_unresolved_errors(self):
         with tempfile.TemporaryDirectory() as directory:

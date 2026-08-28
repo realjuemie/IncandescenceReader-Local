@@ -607,7 +607,8 @@ body.lightbox-open { overflow: hidden; }
   .admin-account-copy strong, .admin-account-copy small, .admin-account-copy > span { overflow: visible; text-overflow: clip; white-space: normal; overflow-wrap: anywhere; }
   .account-option-checks, .account-row-actions { width: 100%; grid-column: 1 / -1; justify-content: flex-start; }
   .account-option-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .account-option-checks label { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: #fff; text-align: center; white-space: normal; }
+  .account-option-checks label { min-height: 40px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px 4px; border: 1px solid var(--line); border-radius: 10px; background: #fff; font-size: 12px; line-height: 1.2; text-align: center; white-space: nowrap; overflow: hidden; }
+  .account-option-checks input { flex-shrink: 0; margin: 0; }
   .admin-share-presets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .admin-share-custom { grid-template-columns: 1fr 1fr; }
   .admin-share-custom-label { grid-column: 1 / -1; }
@@ -686,8 +687,9 @@ body.lightbox-open { overflow: hidden; }
   .credential-form, .proxy-settings-block, .member-access-block { padding: 12px; }
   .credential-notice { align-items: stretch; flex-direction: column; gap: 4px; }
   .admin-account-card, .admin-member-card { padding: 12px; }
-  .account-row-actions, .admin-member-footer .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
-  .account-row-actions > *, .admin-member-footer .row-actions > * { width: 100%; min-width: 0; padding-right: 7px; padding-left: 7px; }
+  .account-row-actions, .admin-member-footer .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .account-row-actions > *, .admin-member-footer .row-actions > * { width: 100%; min-width: 0; min-height: 44px; display: inline-flex; align-items: center; justify-content: center; padding: 0 8px; border: 1px solid var(--line-strong); border-radius: 12px; background: #fff; font-size: 13px; font-weight: 750; text-align: center; white-space: nowrap; }
+  .account-row-actions .danger-text, .admin-member-footer .row-actions .danger-text { grid-column: 1 / -1; border-color: #ffc1c6; color: var(--danger); background: #fffafb; }
   .proxy-actions .row-actions { width: 100%; }
   .proxy-actions .row-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
   .proxy-actions .row-actions > button { width: 100%; min-width: 0; padding-right: 8px; padding-left: 8px; white-space: normal; }
@@ -715,6 +717,8 @@ body.lightbox-open { overflow: hidden; }
   .admin-session-row { grid-template-columns: 9px minmax(0, 1fr); }
   .admin-session-row .row-actions { width: 100%; grid-column: 1 / -1; justify-content: flex-start; }
   .account-option-checks, .account-row-actions { grid-column: 1 / -1; }
+  .account-option-checks { grid-template-columns: 1fr 1fr; }
+  .account-option-checks .public-option { grid-column: 1 / -1; }
   .admin-member-heading { align-items: flex-start; flex-direction: column; }
   .admin-add-account { grid-template-columns: auto minmax(0, 1fr); }
   .admin-add-account button { width: 100%; grid-column: 1 / -1; }

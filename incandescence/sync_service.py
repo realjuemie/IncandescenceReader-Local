@@ -10,7 +10,7 @@ from .config import ConfigStore
 from .database import Database
 from .media import MediaStore
 from .notifications import BarkNotifier
-from .scraper import FreeXScraper
+from .scraper import FreeXScraper, is_rate_limit_message
 
 
 class SyncBusyError(RuntimeError):
@@ -35,6 +35,7 @@ class SyncService:
         self.notifier = notifier
         self._lock = threading.Lock()
         self._current_account_id: int | None = None
+        self.account_sync_gap_seconds = 3
 
     def status(self) -> dict[str, Any]:
         return {
@@ -243,28 +244,27 @@ class SyncService:
         self, accounts: list[dict[str, Any]], *, reason: str
     ) -> dict[str, Any]:
         results: list[dict[str, Any]] = []
-        for account in accounts:
+        skip_remaining = False
+        for index, account in enumerate(accounts):
+            summary = {
+                "accountId": account["id"],
+                "username": account["username"],
+                "displayName": account.get("display_name") or account["username"],
+            }
+            if skip_remaining:
+                results.append({**summary, "error": "已跳过：抓取额度已用尽，等待解锁后再试"})
+                continue
+            if index and self.account_sync_gap_seconds > 0:
+                await asyncio.sleep(self.account_sync_gap_seconds)
             try:
                 results.append(await self.sync_account(account["id"], reason=reason))
             except SyncBusyError:
-                results.append(
-                    {
-                        "accountId": account["id"],
-                        "username": account["username"],
-                        "displayName": account.get("display_name") or account["username"],
-                        "error": "已有同步任务正在运行",
-                    }
-                )
+                results.append({**summary, "error": "已有同步任务正在运行"})
                 break
             except Exception as error:
-                results.append(
-                    {
-                        "accountId": account["id"],
-                        "username": account["username"],
-                        "displayName": account.get("display_name") or account["username"],
-                        "error": str(error),
-                    }
-                )
+                results.append({**summary, "error": str(error)})
+                if is_rate_limit_message(error):
+                    skip_remaining = True
         return {
             "results": results,
             "succeeded": sum(1 for item in results if "error" not in item),
