@@ -126,7 +126,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             parsed = urlsplit(self.path)
             path = parsed.path
-            query = parse_qs(parsed.query)
+            query = parse_qs(parsed.query, keep_blank_values=True)
+            if path in ("/reader", "/reader/") and not self._reader_query_valid(query):
+                self._serve_page_error(HTTPStatus.NOT_FOUND)
+                return
             if path == "/api/member/status":
                 member = self._member()
                 self._json({"authenticated": member is not None, "member": member})
@@ -216,6 +219,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path.startswith("/files/"):
                 self._serve_data_file(path.removeprefix("/files/"))
                 return
+            if path.startswith("/api/"):
+                self._error(HTTPStatus.NOT_FOUND, "接口不存在")
+                return
             self._serve_static(path)
         except Exception as error:
             self._handle_error(error)
@@ -224,12 +230,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         """Serve metadata for static and media files used by video clients."""
 
         try:
-            path = urlsplit(self.path).path
+            parsed = urlsplit(self.path)
+            path = parsed.path
             if path.startswith("/files/"):
                 self._serve_data_file(path.removeprefix("/files/"))
                 return
             if path.startswith("/api/"):
                 self.send_error(HTTPStatus.METHOD_NOT_ALLOWED)
+                return
+            if path in ("/reader", "/reader/") and not self._reader_query_valid(
+                parse_qs(parsed.query, keep_blank_values=True)
+            ):
+                self._serve_page_error(HTTPStatus.NOT_FOUND)
                 return
             self._serve_static(path)
         except Exception as error:
@@ -518,6 +530,22 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         raise KeyError("账号不存在")
 
+    def _reader_query_valid(self, query: dict[str, list[str]]) -> bool:
+        values = query.get("account")
+        if values is None:
+            return True
+        if len(values) != 1 or not re.fullmatch(r"[1-9]\d*", values[0]):
+            return False
+        try:
+            self._require_visible_account(int(values[0]))
+        except KeyError:
+            return False
+        return True
+
+    def _serve_page_error(self, status: HTTPStatus) -> None:
+        target = self.app.public_dir / "not-found.html"
+        self._send_file(target, cache="no-cache", status=status)
+
     def _serve_static(self, request_path: str) -> None:
         if request_path in ("", "/"):
             relative = "home.html"
@@ -533,10 +561,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             target.relative_to(self.app.public_dir)
         except ValueError:
-            self._error(HTTPStatus.FORBIDDEN, "拒绝访问")
+            self._serve_page_error(HTTPStatus.FORBIDDEN)
             return
         if not target.is_file():
-            self._error(HTTPStatus.NOT_FOUND, "页面不存在")
+            self._serve_page_error(HTTPStatus.NOT_FOUND)
             return
         self._send_file(
             target,
@@ -575,10 +603,16 @@ class RequestHandler(BaseHTTPRequestHandler):
             return
         self._send_file(target, cache="public, max-age=31536000, immutable", ranges=True)
 
-    def _send_file(self, path: Path, *, cache: str, ranges: bool = False) -> None:
+    def _send_file(
+        self,
+        path: Path,
+        *,
+        cache: str,
+        ranges: bool = False,
+        status: HTTPStatus = HTTPStatus.OK,
+    ) -> None:
         size = path.stat().st_size
         start, end = 0, size - 1
-        status = HTTPStatus.OK
         range_header = self.headers.get("range") if ranges else None
         if range_header:
             match = re.fullmatch(r"bytes=(\d*)-(\d*)", range_header.strip())

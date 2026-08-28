@@ -4,6 +4,7 @@ import asyncio
 import json
 import sqlite3
 import tempfile
+import threading
 import unittest
 from datetime import datetime, timezone
 from pathlib import Path
@@ -23,7 +24,7 @@ from incandescence.scraper import (
     inspect_cookie_input,
 )
 from incandescence.sync_service import SyncService
-from incandescence.web import Application
+from incandescence.web import Application, create_server
 
 
 def sample_tweet(tweet_id: str, text: str) -> dict:
@@ -741,6 +742,61 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(item["repliedTo"]["id"], "219")
             self.assertEqual(item["repliedTo"]["authorUsername"], "target")
             self.assertIn("authors/target", item["repliedTo"]["authorAvatarUrl"])
+
+
+class WebRoutingTests(unittest.TestCase):
+    def test_reader_account_validation_and_html_not_found_pages(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "reader.db")
+            account = database.create_account("visible_account")
+            config = ConfigStore(root)
+            application = Application(
+                data_dir=root,
+                public_dir=Path(__file__).resolve().parents[1] / "public",
+                database=database,
+                config=config,
+                admin_auth=AdminAuth(root),
+                member_auth=MemberAuth(database),
+                notifier=SimpleNamespace(),
+                scraper=SimpleNamespace(),
+                sync_service=SimpleNamespace(),
+                scheduler=SimpleNamespace(),
+                scraper_runtime=SimpleNamespace(),
+            )
+            server = create_server(("127.0.0.1", 0), application)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                valid = httpx.get(
+                    f"{base_url}/reader?account={account['id']}", timeout=3
+                )
+                self.assertEqual(valid.status_code, 200)
+                self.assertIn("X拾光", valid.text)
+
+                for invalid in ("abc", "99999", "", "1&account=2"):
+                    response = httpx.get(
+                        f"{base_url}/reader?account={invalid}", timeout=3
+                    )
+                    self.assertEqual(response.status_code, 404)
+                    self.assertTrue(response.headers["content-type"].startswith("text/html"))
+                    self.assertIn("返回账号导航", response.text)
+
+                missing = httpx.get(f"{base_url}/path-that-does-not-exist", timeout=3)
+                self.assertEqual(missing.status_code, 404)
+                self.assertTrue(missing.headers["content-type"].startswith("text/html"))
+                self.assertIn('href="/"', missing.text)
+
+                missing_api = httpx.get(f"{base_url}/api/does-not-exist", timeout=3)
+                self.assertEqual(missing_api.status_code, 404)
+                self.assertTrue(
+                    missing_api.headers["content-type"].startswith("application/json")
+                )
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=3)
 
 
 class FakeScraper:

@@ -35,15 +35,26 @@ async function initialize() {
     state.accounts = response.items;
     state.member = memberStatus.member || null;
     renderMemberStatus();
-    const requested = Number(new URLSearchParams(location.search).get("account"));
+    const params = new URLSearchParams(location.search);
+    const requestedRaw = params.get("account");
     const remembered = Number(localStorage.getItem("reader-account-id"));
-    if (state.accounts.some((item) => item.id === requested)) state.selectedId = requested;
+    if (params.has("account")) {
+      const requested = /^[1-9]\d*$/.test(requestedRaw || "") ? Number(requestedRaw) : null;
+      if (!requested || !state.accounts.some((item) => item.id === requested)) {
+        showInvalidAccountState();
+        return;
+      }
+      state.selectedId = requested;
+    }
     else if (state.accounts.some((item) => item.id === remembered)) state.selectedId = remembered;
     else state.selectedId = state.accounts[0]?.id || null;
     renderAccounts();
     await selectAccount(state.selectedId);
   } catch (error) {
+    renderProfile();
     showToast(error.message, true);
+  } finally {
+    $("#reader-loading-state").hidden = true;
   }
   window.setInterval(refreshPublicContent, 30000);
 }
@@ -107,18 +118,21 @@ function renderAccounts() {
     button.append(createAvatar(account, "account-avatar"));
     const copy = document.createElement("span");
     copy.className = "account-copy";
+    const heading = document.createElement("span");
+    heading.className = "account-heading";
     const name = document.createElement("strong");
     name.textContent = account.displayName;
+    heading.append(name);
     const handle = document.createElement("small");
     handle.textContent = t("accountItems", { username: account.username, count: formatCount(account.tweetCount || 0) });
-    copy.append(name, handle);
-    button.append(copy);
     if (!account.isPublic) {
       const privacy = document.createElement("span");
       privacy.className = "account-privacy";
       privacy.textContent = state.member ? t("memberVisible") : t("adminShort");
-      button.append(privacy);
+      heading.append(privacy);
     }
+    copy.append(heading, handle);
+    button.append(copy);
     button.addEventListener("click", () => selectAccount(account.id));
     list.append(button);
   }
@@ -133,6 +147,7 @@ function renderMemberStatus() {
     );
     const logout = document.createElement("button");
     logout.type = "button";
+    logout.className = "member-status-action";
     logout.textContent = t("signOut");
     logout.addEventListener("click", async () => {
       await api("/api/member/logout", { method: "POST", body: {} });
@@ -146,6 +161,17 @@ function renderMemberStatus() {
     login.textContent = t("memberSignIn");
     container.append(login);
   }
+}
+
+function showInvalidAccountState() {
+  state.selectedId = null;
+  renderAccounts();
+  $("#reader").hidden = true;
+  $("#empty-state").hidden = false;
+  $("#empty-title").textContent = t("readerAccountNotFound");
+  $("#empty-description").textContent = t("readerAccountNotFoundHelp");
+  $("#empty-home-link").hidden = false;
+  toggleSidebar(false);
 }
 
 async function selectAccount(accountId) {
@@ -216,7 +242,12 @@ function renderProfile() {
   const account = currentAccount();
   $("#empty-state").hidden = Boolean(account);
   $("#reader").hidden = !account;
-  if (!account) return;
+  if (!account) {
+    $("#empty-title").textContent = t("noReadableAccounts");
+    $("#empty-description").textContent = t("noReadableAccountsHelp");
+    $("#empty-home-link").hidden = true;
+    return;
+  }
   $("#profile-name").textContent = account.displayName;
   $("#profile-handle").textContent = `@${account.username}`;
   $("#profile-bio").textContent = account.bio || t("noBio");
