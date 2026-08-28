@@ -393,13 +393,17 @@ class FreeXScraper:
 
     @staticmethod
     def _user_to_dict(user: Any) -> dict[str, Any]:
-        avatar_url = (user.profileImageUrl or "").replace("_normal.", "_400x400.")
+        avatar_icon_url = str(user.profileImageUrl or "").strip()
+        avatar_url = avatar_icon_url.replace("_normal.", "_400x400.")
         return {
             "id": str(user.id),
             "username": user.username,
             "display_name": user.displayname,
             "bio": user.rawDescription or "",
             "avatar_url": avatar_url or None,
+            # Bark only needs a small icon. Prefer the exact URL returned by X
+            # instead of assuming every profile has a 400x400 rendition.
+            "avatar_icon_url": avatar_icon_url or avatar_url or None,
             "banner_url": user.profileBannerUrl,
             "protected": bool(user.protected),
             "verified": bool(user.verified or user.blue),

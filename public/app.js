@@ -233,7 +233,18 @@ function renderProfile() {
     `<span><strong>${formatCount(account.mediaCount || 0)}</strong> 本站媒体</span>`,
     metrics.followers != null ? `<span><strong>${formatCount(metrics.followers)}</strong> 关注者</span>` : "",
   ].join("");
+  $("#profile-tracking").textContent = account.trackingStartedAt
+    ? `本站自 ${formatTrackingStart(account.trackingStartedAt)} 开始抓取`
+    : "抓取起始时间暂不可用";
   $("#public-updated").textContent = account.lastSyncedAt ? `更新于 ${relativeTime(account.lastSyncedAt)}` : "等待首次更新";
+}
+
+function formatTrackingStart(value) {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "未知时间";
+  const hour = String(date.getHours()).padStart(2, "0");
+  const minute = String(date.getMinutes()).padStart(2, "0");
+  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hour}时${minute}分`;
 }
 
 function createAvatar(account, className = "") {

@@ -72,6 +72,7 @@ class Application:
             "verified": bool(account.get("is_verified")),
             "isPublic": bool(account.get("is_public", 1)),
             "metrics": metrics,
+            "trackingStartedAt": account.get("created_at"),
             "lastSyncedAt": account.get("last_synced_at"),
             "tweetCount": account.get("tweet_count", 0),
             "mediaCount": account.get("media_count", 0),

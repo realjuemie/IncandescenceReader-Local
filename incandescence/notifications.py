@@ -84,7 +84,7 @@ class BarkNotifier:
             settings,
             title=f"@{username} 有 {inserted} 条新内容",
             body="\n".join(lines),
-            icon_url=str(profile.get("avatar_url") or "") or None,
+            icon_url=_profile_icon_url(profile),
             target_url=target_url,
         )
 
@@ -172,3 +172,12 @@ class BarkNotifier:
 def _summary_text(value: Any) -> str:
     text = re.sub(r"\s+", " ", str(value or "")).strip()
     return text[:137] + "…" if len(text) > 140 else text
+
+
+def _profile_icon_url(profile: dict[str, Any]) -> str | None:
+    """Choose the most reliable remote profile image for Bark's icon fetcher."""
+    for key in ("avatar_icon_url", "avatar_url"):
+        value = str(profile.get(key) or "").strip()
+        if value.startswith(("https://", "http://")):
+            return value
+    return None

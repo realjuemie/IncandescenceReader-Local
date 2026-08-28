@@ -23,6 +23,7 @@ from incandescence.scraper import (
     inspect_cookie_input,
 )
 from incandescence.sync_service import SyncService
+from incandescence.web import Application
 
 
 def sample_tweet(tweet_id: str, text: str) -> dict:
@@ -125,7 +126,8 @@ class BarkNotifierTests(unittest.TestCase):
                     profile={
                         "username": "example",
                         "display_name": "Example User",
-                        "avatar_url": "https://pbs.twimg.com/profile_images/example.jpg",
+                        "avatar_url": "https://pbs.twimg.com/profile_images/example_400x400.jpg",
+                        "avatar_icon_url": "https://pbs.twimg.com/profile_images/example_normal.jpg",
                     },
                     tweets=[sample_tweet("301", "这是最新内容")],
                     inserted=1,
@@ -135,10 +137,48 @@ class BarkNotifierTests(unittest.TestCase):
             self.assertEqual(captured["title"], "@example 有 1 条新内容")
             self.assertIn("这是最新内容", captured["body"])
             self.assertEqual(
-                captured["icon"], "https://pbs.twimg.com/profile_images/example.jpg"
+                captured["icon"], "https://pbs.twimg.com/profile_images/example_normal.jpg"
             )
             self.assertEqual(captured["url"], "http://192.168.1.20:8787/reader?account=7")
             self.assertEqual(captured["group"], "本地阅读更新")
+
+    def test_update_payload_falls_back_to_large_avatar(self):
+        with tempfile.TemporaryDirectory() as directory:
+            store = ConfigStore(Path(directory))
+            store.update({"barkEnabled": True, "barkDeviceKey": "device-key-123"})
+            captured = {}
+
+            def handle(request: httpx.Request) -> httpx.Response:
+                captured.update(json.loads(request.content.decode("utf-8")))
+                return httpx.Response(200, json={"code": 200})
+
+            notifier = BarkNotifier(store, transport=httpx.MockTransport(handle))
+            asyncio.run(
+                notifier.notify_account_update(
+                    account_id=7,
+                    profile={
+                        "username": "example",
+                        "avatar_url": "https://pbs.twimg.com/profile_images/example_400x400.jpg",
+                    },
+                    tweets=[sample_tweet("302", "头像回退测试")],
+                    inserted=1,
+                )
+            )
+            self.assertEqual(
+                captured["icon"],
+                "https://pbs.twimg.com/profile_images/example_400x400.jpg",
+            )
+
+    def test_public_account_exposes_tracking_start_time(self):
+        payload = Application.account_public(
+            object(),
+            {
+                "id": 7,
+                "username": "example",
+                "created_at": "2026-08-27T02:04:00Z",
+            },
+        )
+        self.assertEqual(payload["trackingStartedAt"], "2026-08-27T02:04:00Z")
 
     def test_invalid_credential_payload_links_to_admin_credentials(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -375,6 +415,34 @@ class CredentialSaveTests(unittest.TestCase):
 
 
 class ScraperMappingTests(unittest.TestCase):
+    def test_profile_keeps_original_avatar_for_bark(self):
+        user = SimpleNamespace(
+            id="42",
+            username="example",
+            displayname="Example",
+            rawDescription="",
+            profileImageUrl="https://pbs.twimg.com/profile_images/42/avatar_normal.jpg",
+            profileBannerUrl=None,
+            protected=False,
+            verified=False,
+            blue=False,
+            followersCount=1,
+            friendsCount=2,
+            statusesCount=3,
+            mediaCount=4,
+        )
+
+        mapped = FreeXScraper._user_to_dict(user)
+
+        self.assertEqual(
+            mapped["avatar_icon_url"],
+            "https://pbs.twimg.com/profile_images/42/avatar_normal.jpg",
+        )
+        self.assertEqual(
+            mapped["avatar_url"],
+            "https://pbs.twimg.com/profile_images/42/avatar_400x400.jpg",
+        )
+
     def test_reply_is_detected_when_x_omits_the_parent_tweet_id(self):
         media = SimpleNamespace(photos=[], videos=[], animated=[])
         user = SimpleNamespace(
