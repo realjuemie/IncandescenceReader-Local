@@ -320,6 +320,7 @@ class FreeXScraper:
         include_reposts: bool,
         initial_limit: int,
         incremental_limit: int,
+        reply_context_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         API, NoAccountError = self._imports()
         api = API(
@@ -357,10 +358,41 @@ class FreeXScraper:
                     if tweet.retweetedTweet is not None and not include_reposts:
                         continue
                     tweets.append(self._tweet_to_dict(tweet))
+            primary_ids = {str(item["id"]) for item in tweets}
+            reply_contexts: list[dict[str, Any]] = []
+            parent_ids = list(
+                dict.fromkeys(
+                    [
+                        str(item.get("reply_to_id") or "")
+                        for item in tweets
+                        if item.get("reply_to_id")
+                    ]
+                    + [str(value) for value in (reply_context_ids or []) if str(value)]
+                )
+            )[:50]
+            for parent_id in parent_ids:
+                if parent_id in primary_ids:
+                    continue
+                try:
+                    parent = await api.tweet_details(int(parent_id))
+                except NoAccountError:
+                    raise
+                except Exception:
+                    # A deleted, private, or temporarily unavailable parent must not
+                    # prevent the monitored account's own reply from being archived.
+                    continue
+                if parent is None:
+                    continue
+                mapped_parent = self._tweet_to_dict(parent)
+                mapped_parent["context_only"] = True
+                reply_contexts.append(mapped_parent)
+                primary_ids.add(str(mapped_parent["id"]))
+            tweets.extend(reply_contexts)
             tweets.sort(key=lambda item: int(item["id"]))
             return {
                 "profile": self._user_to_dict(user),
                 "tweets": tweets,
+                "replyContextCount": len(reply_contexts),
                 "newestSeenId": str(newest_seen) if newest_seen is not None else last_tweet_id,
             }
         except NoAccountError as error:

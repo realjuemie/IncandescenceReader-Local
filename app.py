@@ -14,6 +14,7 @@ from incandescence.media import MediaStore
 from incandescence.member_auth import MemberAuth
 from incandescence.notifications import BarkNotifier
 from incandescence.scraper import FreeXScraper
+from incandescence.share_auth import ShareAuth
 from incandescence.sync_service import Scheduler, SyncService
 from incandescence.web import Application, create_server
 
@@ -26,6 +27,7 @@ def main() -> None:
     admin_auth = AdminAuth(data_dir)
     database = Database(data_dir / "reader.db")
     member_auth = MemberAuth(database)
+    share_auth = ShareAuth(database)
     scraper = FreeXScraper(
         data_dir / "scraper-sessions.db", proxy_url_getter=config.proxy_url
     )
@@ -43,6 +45,7 @@ def main() -> None:
         config=config,
         admin_auth=admin_auth,
         member_auth=member_auth,
+        share_auth=share_auth,
         notifier=notifier,
         scraper=scraper,
         sync_service=sync_service,

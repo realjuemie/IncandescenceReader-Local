@@ -13,7 +13,9 @@ const state = {
   toastTimer: null,
   inspectTimer: null,
   pollingStarted: false,
+  accountDrafts: new Map(),
   memberDrafts: new Map(),
+  shareAccount: null,
 };
 
 async function api(path, options = {}) {
@@ -56,6 +58,7 @@ function bindEvents() {
   $("#session-list").addEventListener("click", handleSessionAction);
   $("#add-account-form").addEventListener("submit", addAccount);
   $("#admin-account-list").addEventListener("click", handleAccountAction);
+  $("#admin-account-list").addEventListener("input", rememberAccountDraft);
   $("#sync-failure-list").addEventListener("click", handleAccountAction);
   $("#add-member-form").addEventListener("submit", addMember);
   $("#admin-member-list").addEventListener("click", handleMemberAction);
@@ -371,6 +374,12 @@ function renderAccounts() {
     return;
   }
   for (const account of state.accounts) {
+    const draft = state.accountDrafts.get(account.id);
+    const selected = draft || {
+      isPublic: account.isPublic,
+      includeReplies: account.includeReplies,
+      includeReposts: account.includeReposts,
+    };
     const card = document.createElement("article");
     card.className = `admin-account-card${account.isPublic ? "" : " private-account"}${account.lastError ? " has-sync-error" : ""}`;
     const avatar = document.createElement("div");
@@ -402,12 +411,13 @@ function renderAccounts() {
     copy.append(title, meta, error);
     const options = document.createElement("div");
     options.className = "account-option-checks";
-    options.innerHTML = `<label class="public-option"><input type="checkbox" data-option="public" ${account.isPublic ? "checked" : ""}> ${t("publicDisplay")}</label><label><input type="checkbox" data-option="replies" ${account.includeReplies ? "checked" : ""}> ${t("replies")}</label><label><input type="checkbox" data-option="reposts" ${account.includeReposts ? "checked" : ""}> ${t("reposts")}</label>`;
+    options.innerHTML = `<label class="public-option"><input type="checkbox" data-option="public" ${selected.isPublic ? "checked" : ""}> ${t("publicDisplay")}</label><label><input type="checkbox" data-option="replies" ${selected.includeReplies ? "checked" : ""}> ${t("replies")}</label><label><input type="checkbox" data-option="reposts" ${selected.includeReposts ? "checked" : ""}> ${t("reposts")}</label>`;
     const actions = document.createElement("div");
     actions.className = "row-actions account-row-actions";
     actions.append(
       actionButton(t("saveSettings"), "save-account", account.id),
       actionButton(account.syncing ? t("syncing") : t("syncNow"), "sync-account", account.id),
+      actionButton(t("temporaryShare"), "share-account", account.id),
       actionButton(t("deleteAction"), "delete-account", account.id, true),
     );
     const preview = document.createElement("a");
@@ -422,6 +432,16 @@ function renderAccounts() {
     card.append(avatar, copy, options, actions);
     list.append(card);
   }
+}
+
+function rememberAccountDraft(event) {
+  const card = event.target.closest(".admin-account-card");
+  if (!card || !event.target.matches('[data-option]')) return;
+  state.accountDrafts.set(Number(card.dataset.accountId), {
+    isPublic: card.querySelector('[data-option="public"]').checked,
+    includeReplies: card.querySelector('[data-option="replies"]').checked,
+    includeReposts: card.querySelector('[data-option="reposts"]').checked,
+  });
 }
 
 function actionButton(text, action, value, danger = false) {
@@ -632,6 +652,10 @@ async function handleAccountAction(event) {
   const account = state.accounts.find((item) => item.id === id);
   if (!account) return;
   const action = button.dataset.accountAction;
+  if (action === "share-account") {
+    openShareDialog(account);
+    return;
+  }
   button.disabled = true;
   try {
     if (action === "sync-account") {
@@ -653,11 +677,13 @@ async function handleAccountAction(event) {
           isPublic: card.querySelector('[data-option="public"]').checked,
         },
       });
+      state.accountDrafts.delete(id);
       showToast(t("accountSettingsSaved"));
-    } else {
+    } else if (action === "delete-account") {
       const confirmation = window.prompt(t("confirmDeleteAccount", { username: account.username }));
       if (confirmation !== account.username) return;
       await api(`/api/admin/accounts/${id}`, { method: "DELETE" });
+      state.accountDrafts.delete(id);
       showToast(t("accountDeleted", { username: account.username }));
     }
     await reloadAccounts();
@@ -668,6 +694,98 @@ async function handleAccountAction(event) {
     showToast(message, true);
     await reloadAccounts().catch(() => {});
   } finally { button.disabled = false; }
+}
+
+function ensureShareDialog() {
+  let dialog = $("#admin-share-dialog");
+  if (dialog) return dialog;
+  dialog = document.createElement("dialog");
+  dialog.id = "admin-share-dialog";
+  dialog.className = "member-notification-dialog admin-share-dialog";
+  dialog.innerHTML = `
+    <form class="member-notification-card" id="admin-share-form">
+      <header>
+        <div><div class="eyebrow">TEMPORARY ACCESS</div><h2>${t("temporaryShareTitle")}</h2></div>
+        <button type="button" class="member-notification-close" aria-label="${t("close")}">×</button>
+      </header>
+      <p class="member-notification-intro" id="admin-share-intro"></p>
+      <div class="admin-share-duration">
+        <label>${t("validFor")}<input type="number" id="admin-share-value" min="1" max="2160" value="24" required></label>
+        <label>${t("timeUnit")}<select id="admin-share-unit"><option value="60">${t("hours")}</option><option value="1440">${t("days")}</option><option value="1">${t("minutes")}</option></select></label>
+      </div>
+      <label class="admin-share-result" id="admin-share-result" hidden>${t("shareLink")}<input id="admin-share-url" readonly></label>
+      <div class="member-notification-result" id="admin-share-status" role="status"></div>
+      <footer class="member-password-footer">
+        <button type="button" class="secondary-button" id="admin-share-cancel">${t("cancel")}</button>
+        <button type="submit" class="primary-button" id="admin-share-create">${t("createAndCopy")}</button>
+      </footer>
+    </form>`;
+  document.body.append(dialog);
+  dialog.querySelector(".member-notification-close").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#admin-share-cancel").addEventListener("click", () => dialog.close());
+  dialog.querySelector("#admin-share-form").addEventListener("submit", createTemporaryShare);
+  dialog.querySelector("#admin-share-unit").addEventListener("change", constrainShareDuration);
+  dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
+  return dialog;
+}
+
+function constrainShareDuration() {
+  const dialog = ensureShareDialog();
+  const input = dialog.querySelector("#admin-share-value");
+  const unit = Number(dialog.querySelector("#admin-share-unit").value);
+  input.min = unit === 1 ? "5" : "1";
+  input.max = unit === 1440 ? "90" : (unit === 60 ? "2160" : "129600");
+  input.value = String(Math.min(Number(input.max), Math.max(Number(input.min), Number(input.value) || Number(input.min))));
+}
+
+function openShareDialog(account) {
+  const dialog = ensureShareDialog();
+  state.shareAccount = account;
+  dialog.querySelector("#admin-share-intro").textContent = t("temporaryShareIntro", { username: account.username });
+  dialog.querySelector("#admin-share-result").hidden = true;
+  dialog.querySelector("#admin-share-url").value = "";
+  dialog.querySelector("#admin-share-status").textContent = "";
+  dialog.showModal();
+  dialog.querySelector("#admin-share-value").focus();
+}
+
+async function createTemporaryShare(event) {
+  event.preventDefault();
+  if (!state.shareAccount) return;
+  const dialog = ensureShareDialog();
+  const value = Number(dialog.querySelector("#admin-share-value").value);
+  const unit = Number(dialog.querySelector("#admin-share-unit").value);
+  const button = dialog.querySelector("#admin-share-create");
+  button.disabled = true;
+  dialog.querySelector("#admin-share-status").textContent = t("creatingShare");
+  try {
+    const result = await api(`/api/admin/accounts/${state.shareAccount.id}/shares`, {
+      method: "POST",
+      body: { expiresInMinutes: Math.round(value * unit) },
+    });
+    const url = new URL(result.url, window.location.origin).href;
+    const output = dialog.querySelector("#admin-share-url");
+    output.value = url;
+    dialog.querySelector("#admin-share-result").hidden = false;
+    await copyText(url, output);
+    const expiry = new Intl.DateTimeFormat(i18n.localeTag(), {
+      dateStyle: "medium", timeStyle: "short",
+    }).format(new Date(result.expiresAt));
+    dialog.querySelector("#admin-share-status").textContent = t("shareCopiedUntil", { time: expiry });
+    showToast(t("shareCopied"));
+  } catch (error) {
+    dialog.querySelector("#admin-share-status").textContent = error.message;
+  } finally { button.disabled = false; }
+}
+
+async function copyText(value, fallbackInput) {
+  try {
+    await navigator.clipboard.writeText(value);
+  } catch (_) {
+    fallbackInput.focus();
+    fallbackInput.select();
+    if (!document.execCommand("copy")) throw new Error(t("copyFailed"));
+  }
 }
 
 async function reloadAccounts() {

@@ -57,6 +57,7 @@ class SyncService:
                 include_reposts=bool(account["include_reposts"]),
                 initial_limit=settings["initialFetchLimit"],
                 incremental_limit=settings["incrementalScanLimit"],
+                reply_context_ids=self.database.missing_reply_context_ids(account_id),
             )
             result = (
                 await self.scraper_runtime.await_result(fetch)
@@ -95,7 +96,8 @@ class SyncService:
                 "username": account["username"],
                 "displayName": account.get("display_name") or account["username"],
                 "reason": reason,
-                "fetched": len(result["tweets"]),
+                "fetched": len(result["tweets"]) - int(result.get("replyContextCount") or 0),
+                "replyContextsFetched": int(result.get("replyContextCount") or 0),
                 "inserted": inserted,
                 "mediaDownloaded": media_result["downloaded"],
                 "mediaFailed": media_result["failed"],

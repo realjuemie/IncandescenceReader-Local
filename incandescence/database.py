@@ -87,6 +87,7 @@ class Database:
                     reply_to_id TEXT,
                     reply_to_username TEXT,
                     lang TEXT,
+                    context_only INTEGER NOT NULL DEFAULT 0,
                     is_reply INTEGER NOT NULL DEFAULT 0,
                     is_repost INTEGER NOT NULL DEFAULT 0,
                     is_quote INTEGER NOT NULL DEFAULT 0,
@@ -154,6 +155,17 @@ class Database:
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(member_id, account_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS temporary_shares (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
+                    token_hash TEXT NOT NULL UNIQUE,
+                    expires_at TEXT NOT NULL,
+                    created_at TEXT NOT NULL
+                );
+
+                CREATE INDEX IF NOT EXISTS idx_temporary_shares_expiry
+                    ON temporary_shares(expires_at);
                 """
             )
             account_columns = {
@@ -172,6 +184,7 @@ class Database:
                 ("author_avatar_url", "TEXT"),
                 ("author_avatar_path", "TEXT"),
                 ("reply_to_username", "TEXT"),
+                ("context_only", "INTEGER NOT NULL DEFAULT 0"),
             ):
                 if column not in tweet_columns:
                     db.execute(f"ALTER TABLE tweets ADD COLUMN {column} {definition}")
@@ -209,7 +222,7 @@ class Database:
             row = db.execute(
                 """SELECT a.*,
                           (SELECT MAX(t.synced_at) FROM tweets t
-                           WHERE t.account_id = a.id) AS last_content_at
+                           WHERE t.account_id = a.id AND t.context_only = 0) AS last_content_at
                    FROM accounts a WHERE a.id = ?""",
                 (account_id,),
             ).fetchone()
@@ -234,12 +247,13 @@ class Database:
             rows = db.execute(
                 f"""
                 SELECT a.*,
-                       COUNT(t.id) AS tweet_count,
-                       MAX(t.created_at) AS newest_tweet_at,
-                       MAX(t.synced_at) AS last_content_at,
+                       COUNT(CASE WHEN t.context_only = 0 THEN t.id END) AS tweet_count,
+                       MAX(CASE WHEN t.context_only = 0 THEN t.created_at END) AS newest_tweet_at,
+                       MAX(CASE WHEN t.context_only = 0 THEN t.synced_at END) AS last_content_at,
                        (SELECT COUNT(*) FROM media m
                         JOIN tweets mt ON mt.id = m.tweet_id
-                        WHERE mt.account_id = a.id AND m.local_path IS NOT NULL) AS media_count,
+                        WHERE mt.account_id = a.id AND mt.context_only = 0
+                          AND m.local_path IS NOT NULL) AS media_count,
                        (SELECT COUNT(*) FROM media m
                         JOIN tweets mt ON mt.id = m.tweet_id
                         WHERE mt.account_id = a.id
@@ -363,10 +377,10 @@ class Database:
                         INSERT OR IGNORE INTO tweets(
                             id, account_id, author_id, author_username, author_name,
                             author_avatar_url, author_avatar_path, text,
-                            created_at, conversation_id, reply_to_id, reply_to_username, lang, is_reply,
+                            created_at, conversation_id, reply_to_id, reply_to_username, lang, context_only, is_reply,
                             is_repost, is_quote, possibly_sensitive, metrics_json, links_json,
                             quoted_json, source_url, synced_at
-                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         """,
                         (
                             str(tweet["id"]), account_id, str(tweet.get("author_id") or ""),
@@ -376,7 +390,8 @@ class Database:
                             str(tweet.get("conversation_id") or ""),
                             str(tweet.get("reply_to_id") or "") or None,
                             tweet.get("reply_to_username"),
-                            tweet.get("lang"), int(bool(tweet.get("is_reply"))),
+                            tweet.get("lang"), int(bool(tweet.get("context_only"))),
+                            int(bool(tweet.get("is_reply"))),
                             int(bool(tweet.get("is_repost"))), int(bool(tweet.get("is_quote"))),
                             int(bool(tweet.get("possibly_sensitive"))),
                             json.dumps(tweet.get("metrics") or {}, ensure_ascii=False),
@@ -386,14 +401,16 @@ class Database:
                             tweet.get("source_url") or "", now,
                         ),
                     )
-                    inserted += int(result.rowcount > 0)
+                    if not bool(tweet.get("context_only")):
+                        inserted += int(result.rowcount > 0)
                     if result.rowcount == 0:
                         db.execute(
                             """UPDATE tweets SET
                                    author_username = ?, author_name = ?,
                                    author_avatar_url = COALESCE(?, author_avatar_url),
                                    author_avatar_path = COALESCE(?, author_avatar_path),
-                                   reply_to_username = COALESCE(?, reply_to_username)
+                                   reply_to_username = COALESCE(?, reply_to_username),
+                                   context_only = CASE WHEN ? = 0 THEN 0 ELSE context_only END
                                WHERE id = ?""",
                             (
                                 tweet.get("author_username") or "",
@@ -401,6 +418,7 @@ class Database:
                                 tweet.get("author_avatar_url"),
                                 tweet.get("author_avatar_path"),
                                 tweet.get("reply_to_username"),
+                                int(bool(tweet.get("context_only"))),
                                 str(tweet["id"]),
                             ),
                         )
@@ -439,12 +457,17 @@ class Database:
                 FROM media m
                 JOIN tweets t ON t.id = m.tweet_id
                 JOIN accounts a ON a.id = t.account_id
-                WHERE t.account_id = ?
+                WHERE (
+                    t.account_id = ? OR EXISTS (
+                        SELECT 1 FROM tweets reply
+                        WHERE reply.account_id = ? AND reply.reply_to_id = t.id
+                    )
+                )
                   AND (m.local_path IS NULL OR m.download_error IS NOT NULL)
                 ORDER BY t.created_at DESC, m.id ASC
                 LIMIT ?
                 """,
-                (account_id, limit),
+                (account_id, account_id, limit),
             ).fetchall()
         return [dict(row) for row in rows]
 
@@ -461,6 +484,24 @@ class Database:
                 (account_id, max(1, min(100, int(limit)))),
             ).fetchall()
         return [str(row["author_username"]) for row in rows]
+
+    def missing_reply_context_ids(self, account_id: int, limit: int = 50) -> list[str]:
+        """Find previously archived replies whose direct parent is still absent."""
+
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT DISTINCT r.reply_to_id
+                   FROM tweets r
+                   WHERE r.account_id = ? AND r.context_only = 0 AND r.is_reply = 1
+                     AND r.reply_to_id IS NOT NULL AND r.reply_to_id <> ''
+                     AND NOT EXISTS (
+                         SELECT 1 FROM tweets parent WHERE parent.id = r.reply_to_id
+                     )
+                   ORDER BY r.created_at DESC
+                   LIMIT ?""",
+                (account_id, max(1, min(100, int(limit)))),
+            ).fetchall()
+        return [str(row["reply_to_id"]) for row in rows]
 
     def update_author_avatar(
         self, account_id: int, username: str, source_url: str, local_path: str
@@ -508,7 +549,7 @@ class Database:
         month: int | str | None = None,
     ) -> dict[str, Any]:
         limit = min(100, max(1, int(limit)))
-        clauses = ["t.account_id = ?"]
+        clauses = ["t.account_id = ?", "t.context_only = 0"]
         params: list[Any] = [account_id]
         if query.strip():
             clauses.append("t.text LIKE ? ESCAPE '\\'")
@@ -596,8 +637,8 @@ class Database:
                                END AS resolved_author_avatar_path
                         FROM tweets t
                         JOIN accounts a ON a.id = t.account_id
-                        WHERE t.account_id = ? AND t.id IN ({parent_placeholders})""",
-                    [account_id, *missing_parent_ids],
+                        WHERE t.id IN ({parent_placeholders})""",
+                    missing_parent_ids,
                 ).fetchall()
                 tweet_rows.update({str(row["id"]): row for row in parent_rows})
             ids = list(tweet_rows)
@@ -642,6 +683,7 @@ class Database:
                        COUNT(*) AS count
                 FROM tweets
                 WHERE account_id = ?
+                  AND context_only = 0
                   AND created_at GLOB '[0-9][0-9][0-9][0-9]-[0-9][0-9]-*'
                 GROUP BY substr(created_at, 1, 7)
                 ORDER BY substr(created_at, 1, 7) DESC
@@ -652,6 +694,38 @@ class Database:
             {"year": int(row["year"]), "month": int(row["month"]), "count": int(row["count"])}
             for row in rows
         ]
+
+    def create_temporary_share(
+        self, account_id: int, token_hash: str, expires_at: str
+    ) -> dict[str, Any]:
+        self.get_account(account_id)
+        now = utc_now()
+        with self.connection() as db:
+            db.execute("DELETE FROM temporary_shares WHERE expires_at <= ?", (now,))
+            cursor = db.execute(
+                """INSERT INTO temporary_shares(account_id, token_hash, expires_at, created_at)
+                   VALUES (?, ?, ?, ?)""",
+                (account_id, token_hash, expires_at, now),
+            )
+            row = db.execute(
+                "SELECT * FROM temporary_shares WHERE id = ?", (cursor.lastrowid,)
+            ).fetchone()
+            db.commit()
+        return dict(row)
+
+    def get_temporary_share(self, token_hash: str) -> dict[str, Any] | None:
+        now = utc_now()
+        with self.connection() as db:
+            db.execute("DELETE FROM temporary_shares WHERE expires_at <= ?", (now,))
+            row = db.execute(
+                """SELECT ts.*, a.username, a.display_name
+                   FROM temporary_shares ts
+                   JOIN accounts a ON a.id = ts.account_id
+                   WHERE ts.token_hash = ? AND ts.expires_at > ?""",
+                (token_hash, now),
+            ).fetchone()
+            db.commit()
+        return dict(row) if row else None
 
     def file_owner_accounts(self, relative_path: str) -> list[dict[str, Any]]:
         with self.connection() as db:
@@ -668,8 +742,28 @@ class Database:
                 SELECT a.id, a.is_public FROM tweets t
                 JOIN accounts a ON a.id = t.account_id
                 WHERE t.author_avatar_path = ?
+                UNION
+                SELECT ra.id, ra.is_public FROM media m
+                JOIN tweets parent ON parent.id = m.tweet_id
+                JOIN tweets reply ON reply.reply_to_id = parent.id
+                JOIN accounts ra ON ra.id = reply.account_id
+                WHERE m.local_path = ? OR m.preview_local_path = ?
+                UNION
+                SELECT ra.id, ra.is_public FROM tweets parent
+                JOIN tweets reply ON reply.reply_to_id = parent.id
+                JOIN accounts ra ON ra.id = reply.account_id
+                WHERE parent.author_avatar_path = ?
                 """,
-                (relative_path, relative_path, relative_path, relative_path, relative_path),
+                (
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                    relative_path,
+                ),
             ).fetchall()
         return [dict(row) for row in rows]
 

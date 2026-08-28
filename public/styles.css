@@ -455,6 +455,11 @@ body.lightbox-open { overflow: hidden; }
 .account-option-checks { display: flex; gap: 10px; color: var(--muted); font-size: var(--text-caption); }
 .account-option-checks label { white-space: nowrap; }
 .account-option-checks .public-option { color: var(--ink); font-weight: 700; }
+.account-row-actions { flex-wrap: wrap; }
+.admin-share-dialog { width: min(520px, calc(100vw - 28px)); }
+.admin-share-duration { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, .55fr); gap: 12px; }
+.admin-share-duration label, .admin-share-result { display: grid; gap: 7px; color: var(--muted); font-size: var(--text-caption); font-weight: 700; }
+.admin-share-result input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
 .admin-member-list { display: grid; gap: 10px; }
 .admin-member-card { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
 .admin-member-card.has-unsaved { border-color: #9dd4f6; box-shadow: inset 3px 0 0 var(--blue); }
@@ -586,6 +591,7 @@ body.lightbox-open { overflow: hidden; }
   .account-option-checks, .account-row-actions { width: 100%; grid-column: 1 / -1; justify-content: flex-start; }
   .account-option-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .account-option-checks label { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: #fff; text-align: center; white-space: normal; }
+  .admin-share-duration { grid-template-columns: 1fr; }
   .admin-settings-grid { grid-template-columns: 1fr; }
   .bark-settings-grid { grid-template-columns: 1fr; }
   .proxy-actions { align-items: flex-start; flex-direction: column; }

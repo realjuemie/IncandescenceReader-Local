@@ -23,6 +23,7 @@ from incandescence.scraper import (
     extract_session_cookies,
     inspect_cookie_input,
 )
+from incandescence.share_auth import ShareAuth
 from incandescence.sync_service import SyncService
 from incandescence.web import Application, create_server
 
@@ -481,6 +482,99 @@ class ScraperMappingTests(unittest.TestCase):
         self.assertTrue(mapped["is_reply"])
         self.assertEqual(mapped["reply_to_username"], "target")
 
+    def test_fetch_latest_resolves_the_original_post_for_a_reply(self):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+
+        def user(username: str, user_id: str):
+            return SimpleNamespace(
+                id=user_id,
+                username=username,
+                displayname=username.title(),
+                rawDescription="",
+                profileImageUrl=None,
+                profileBannerUrl=None,
+                protected=False,
+                verified=False,
+                blue=False,
+                followersCount=1,
+                friendsCount=2,
+                statusesCount=3,
+                mediaCount=0,
+            )
+
+        monitored = user("monitored", "42")
+        other = user("other", "99")
+
+        def tweet(tweet_id, author, text, *, parent_id=None, parent_user=None):
+            return SimpleNamespace(
+                id=tweet_id,
+                user=author,
+                rawContent=text,
+                date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+                conversationId=parent_id or tweet_id,
+                inReplyToTweetId=parent_id,
+                inReplyToUser=parent_user,
+                inReplyToScreenName=parent_user.username if parent_user else None,
+                lang="zh",
+                retweetedTweet=None,
+                quotedTweet=None,
+                possibly_sensitive=False,
+                replyCount=0,
+                retweetCount=0,
+                likeCount=0,
+                quoteCount=0,
+                bookmarkedCount=0,
+                viewCount=0,
+                links=[],
+                url=f"https://x.com/{author.username}/status/{tweet_id}",
+                media=media,
+            )
+
+        reply = tweet("301", monitored, "@other reply", parent_id="300", parent_user=other)
+        parent = tweet("300", other, "original post")
+
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakeAPI:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def user_by_login(self, username):
+                return monitored
+
+            async def user_tweets_and_replies(self, user_id, limit=-1):
+                yield reply
+
+            async def user_tweets(self, user_id, limit=-1):
+                yield reply
+
+            async def tweet_details(self, tweet_id):
+                return parent if tweet_id == 300 else None
+
+        class FakeReplyScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return FakeAPI, NoAccountError
+
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                FakeReplyScraper(Path(directory) / "sessions.db").fetch_latest(
+                    username="monitored",
+                    last_tweet_id=None,
+                    include_replies=True,
+                    include_reposts=False,
+                    initial_limit=20,
+                    incremental_limit=20,
+                )
+            )
+
+        self.assertEqual(result["replyContextCount"], 1)
+        mapped = {item["id"]: item for item in result["tweets"]}
+        self.assertTrue(mapped["300"]["context_only"])
+        self.assertEqual(mapped["300"]["author_username"], "other")
+        self.assertEqual(mapped["301"]["reply_to_id"], "300")
+
 
 class DatabaseTests(unittest.TestCase):
     def test_tweet_pagination_and_duplicate_insert(self):
@@ -743,6 +837,38 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(item["repliedTo"]["authorUsername"], "target")
             self.assertIn("authors/target", item["repliedTo"]["authorAvatarUrl"])
 
+    def test_reply_context_is_embedded_but_not_listed_as_monitored_content(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("monitored")
+            parent = sample_tweet("230", "another blogger's original post")
+            parent.update(
+                {
+                    "author_id": "99",
+                    "author_username": "other",
+                    "author_name": "Other",
+                    "context_only": True,
+                }
+            )
+            reply = sample_tweet("231", "@other my reply")
+            reply.update(
+                {
+                    "reply_to_id": "230",
+                    "reply_to_username": "other",
+                    "is_reply": True,
+                }
+            )
+
+            self.assertEqual(db.insert_tweets(account["id"], [reply]), 1)
+            self.assertEqual(db.missing_reply_context_ids(account["id"]), ["230"])
+            self.assertEqual(db.insert_tweets(account["id"], [parent]), 0)
+            self.assertEqual(db.missing_reply_context_ids(account["id"]), [])
+            page = db.list_tweets(account["id"])
+
+            self.assertEqual([item["id"] for item in page["items"]], ["231"])
+            self.assertEqual(page["items"][0]["repliedTo"]["id"], "230")
+            self.assertEqual(page["items"][0]["repliedTo"]["authorUsername"], "other")
+
 
 class WebRoutingTests(unittest.TestCase):
     def test_reader_account_validation_and_html_not_found_pages(self):
@@ -751,13 +877,17 @@ class WebRoutingTests(unittest.TestCase):
             database = Database(root / "reader.db")
             account = database.create_account("visible_account")
             config = ConfigStore(root)
+            share_auth = ShareAuth(database)
+            admin_auth = AdminAuth(root)
+            admin_token = admin_auth.setup("test-admin-password")
             application = Application(
                 data_dir=root,
                 public_dir=Path(__file__).resolve().parents[1] / "public",
                 database=database,
                 config=config,
-                admin_auth=AdminAuth(root),
+                admin_auth=admin_auth,
                 member_auth=MemberAuth(database),
+                share_auth=share_auth,
                 notifier=SimpleNamespace(),
                 scraper=SimpleNamespace(),
                 sync_service=SimpleNamespace(),
@@ -793,6 +923,47 @@ class WebRoutingTests(unittest.TestCase):
                 self.assertTrue(
                     missing_api.headers["content-type"].startswith("application/json")
                 )
+
+                private = database.create_account("private_account")
+                database.update_account_options(
+                    private["id"],
+                    include_replies=True,
+                    include_reposts=False,
+                    is_public=False,
+                )
+                blocked = httpx.get(
+                    f"{base_url}/reader?account={private['id']}", timeout=3
+                )
+                self.assertEqual(blocked.status_code, 404)
+                denied_share = httpx.post(
+                    f"{base_url}/api/admin/accounts/{private['id']}/shares",
+                    json={"expiresInMinutes": 60},
+                    timeout=3,
+                )
+                self.assertEqual(denied_share.status_code, 401)
+                created_share = httpx.post(
+                    f"{base_url}/api/admin/accounts/{private['id']}/shares",
+                    json={"expiresInMinutes": 60},
+                    headers={"Cookie": f"{admin_auth.COOKIE_NAME}={admin_token}"},
+                    timeout=3,
+                )
+                self.assertEqual(created_share.status_code, 201)
+                share_url = created_share.json()["url"]
+                with httpx.Client(follow_redirects=False, timeout=3) as client:
+                    opened = client.get(f"{base_url}{share_url}")
+                    self.assertEqual(opened.status_code, 302)
+                    self.assertEqual(
+                        opened.headers["location"], f"/reader?account={private['id']}"
+                    )
+                    shared_reader = client.get(f"{base_url}{opened.headers['location']}")
+                    self.assertEqual(shared_reader.status_code, 200)
+                    shared_accounts = client.get(f"{base_url}/api/public/accounts")
+                    self.assertIn(
+                        private["id"],
+                        {item["id"] for item in shared_accounts.json()["items"]},
+                    )
+                expired = httpx.get(f"{base_url}/s/not-a-real-share-token-1234567890", timeout=3)
+                self.assertEqual(expired.status_code, 404)
             finally:
                 server.shutdown()
                 server.server_close()

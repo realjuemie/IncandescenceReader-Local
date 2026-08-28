@@ -23,6 +23,7 @@ from .scraper import (
     FreeXScraper,
     inspect_cookie_input,
 )
+from .share_auth import ShareAuth
 from .sync_service import Scheduler, SyncBusyError, SyncService
 
 
@@ -36,6 +37,7 @@ class Application:
         config: ConfigStore,
         admin_auth: AdminAuth,
         member_auth: MemberAuth,
+        share_auth: ShareAuth,
         notifier: BarkNotifier,
         scraper: FreeXScraper,
         sync_service: SyncService,
@@ -48,6 +50,7 @@ class Application:
         self.config = config
         self.admin_auth = admin_auth
         self.member_auth = member_auth
+        self.share_auth = share_auth
         self.notifier = notifier
         self.scraper = scraper
         self.sync_service = sync_service
@@ -127,6 +130,19 @@ class RequestHandler(BaseHTTPRequestHandler):
             parsed = urlsplit(self.path)
             path = parsed.path
             query = parse_qs(parsed.query, keep_blank_values=True)
+            share_match = re.fullmatch(r"/s/([A-Za-z0-9_-]{32,256})", path)
+            if share_match:
+                share = self.app.share_auth.resolve_token(share_match.group(1))
+                if not share:
+                    self._serve_page_error(HTTPStatus.NOT_FOUND)
+                    return
+                self._redirect(
+                    f"/reader?account={int(share['account_id'])}",
+                    cookie=self.app.share_auth.session_cookie(
+                        share_match.group(1), str(share["expires_at"])
+                    ),
+                )
+                return
             if path in ("/reader", "/reader/") and not self._reader_query_valid(query):
                 self._serve_page_error(HTTPStatus.NOT_FOUND)
                 return
@@ -143,14 +159,23 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/public/accounts":
                 is_admin = self._admin_authenticated()
                 member = None if is_admin else self._member()
+                accounts = self.app.database.list_accounts(
+                    public_only=not is_admin and member is None,
+                    member_id=int(member["id"]) if member else None,
+                )
+                shared_account_id = self._shared_account_id()
+                if shared_account_id is not None and not any(
+                    int(item["id"]) == shared_account_id for item in accounts
+                ):
+                    try:
+                        accounts.append(self.app.database.get_account(shared_account_id))
+                    except KeyError:
+                        pass
                 self._json(
                     {
                         "items": [
                             self.app.account_public(a, include_admin=is_admin)
-                            for a in self.app.database.list_accounts(
-                                public_only=not is_admin and member is None,
-                                member_id=int(member["id"]) if member else None,
-                            )
+                            for a in accounts
                         ]
                     }
                 )
@@ -380,6 +405,20 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 self._json(result)
                 return
+            match = re.fullmatch(r"/api/admin/accounts/(\d+)/shares", path)
+            if match:
+                share = self.app.share_auth.create(
+                    int(match.group(1)), body.get("expiresInMinutes")
+                )
+                self._json(
+                    {
+                        "accountId": share["accountId"],
+                        "expiresAt": share["expiresAt"],
+                        "url": f"/s/{share['token']}",
+                    },
+                    HTTPStatus.CREATED,
+                )
+                return
             self._error(HTTPStatus.NOT_FOUND, "接口不存在")
         except Exception as error:
             self._handle_error(error)
@@ -525,10 +564,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         account = self.app.database.get_account(account_id)
         if bool(account.get("is_public", 1)) or self._admin_authenticated():
             return
+        if self._shared_account_id() == account_id:
+            return
         member = self._member()
         if member and self.app.database.member_can_access(int(member["id"]), account_id):
             return
         raise KeyError("账号不存在")
+
+    def _shared_account_id(self) -> int | None:
+        share = self.app.share_auth.current(self.headers.get("Cookie"))
+        return int(share["account_id"]) if share else None
 
     def _reader_query_valid(self, query: dict[str, list[str]]) -> bool:
         values = query.get("account")
@@ -589,6 +634,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.app.database.member_can_access(int(member["id"]), int(owner["id"]))
                     for owner in owners
                 )
+            shared_account_id = self._shared_account_id()
+            if shared_account_id is not None and not allowed:
+                allowed = any(
+                    int(owner["id"]) == shared_account_id for owner in owners
+                )
             if not allowed:
                 self._error(HTTPStatus.NOT_FOUND, "文件不存在")
                 return
@@ -602,6 +652,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._error(HTTPStatus.NOT_FOUND, "文件不存在")
             return
         self._send_file(target, cache="public, max-age=31536000, immutable", ranges=True)
+
+    def _redirect(self, location: str, *, cookie: str | None = None) -> None:
+        self.send_response(HTTPStatus.FOUND)
+        self.send_header("Location", location)
+        self.send_header("Cache-Control", "no-store")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
+        self._security_headers()
+        self.end_headers()
 
     def _send_file(
         self,
