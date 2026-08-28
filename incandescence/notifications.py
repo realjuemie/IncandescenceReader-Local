@@ -33,7 +33,7 @@ class BarkNotifier:
     ) -> dict[str, Any]:
         return await self._send(
             settings,
-            title="Incandescence · Bark 测试成功",
+            title="XGlow · Bark 测试成功",
             body="通知渠道已连接。后续选中的账号出现新内容时会在这里提醒。",
             icon_url=icon_url,
             target_url=settings.get("siteBaseUrl") or None,
@@ -135,7 +135,7 @@ class BarkNotifier:
             "device_key": device_key,
             "title": title[:120],
             "body": body[:1500],
-            "group": str(settings.get("barkGroup") or "Incandescence")[:64],
+            "group": str(settings.get("barkGroup") or "XGlow")[:64],
             "level": "active",
         }
         if icon_url:

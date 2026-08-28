@@ -1,6 +1,8 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
+const i18n = window.XGlowI18n;
+const t = (key, variables) => i18n.t(key, variables);
 const state = {
   setupRequired: false,
   accounts: [],
@@ -25,7 +27,7 @@ async function api(path, options = {}) {
   try { payload = await response.json(); } catch (_) { /* empty response */ }
   if (!response.ok) {
     if (response.status === 401 && !path.endsWith("/login")) showAuth(false);
-    throw new Error(payload.error || `请求失败 (${response.status})`);
+    throw new Error(i18n.localizeError(payload.error) || t("requestFailed", { status: response.status }));
   }
   return payload;
 }
@@ -71,11 +73,11 @@ function showAuth(setupRequired) {
   state.setupRequired = Boolean(setupRequired);
   $("#admin-app").hidden = true;
   $("#auth-view").hidden = false;
-  $("#auth-title").textContent = state.setupRequired ? "设置管理员密码" : "管理员登录";
+  $("#auth-title").textContent = state.setupRequired ? t("setupAdmin") : (i18n.locale === "en" ? "Administrator sign in" : "管理员登录");
   $("#auth-description").textContent = state.setupRequired
-    ? "这是首次启动。请创建一个仅用于本站管理后台的密码。"
-    : "登录后管理抓取凭证、阅读账号和自动更新。";
-  $("#auth-submit").textContent = state.setupRequired ? "创建密码并进入后台" : "登录";
+    ? t("setupDescription")
+    : (i18n.locale === "en" ? "Sign in to manage X credentials, reading accounts, and automatic updates." : "登录后管理抓取凭证、阅读账号和自动更新。");
+  $("#auth-submit").textContent = state.setupRequired ? t("createAdmin") : (i18n.locale === "en" ? "Sign in" : "登录");
   $("#confirm-password-row").hidden = !state.setupRequired;
   $("#admin-password").autocomplete = state.setupRequired ? "new-password" : "current-password";
   $("#admin-password").value = "";
@@ -87,7 +89,7 @@ async function authenticate(event) {
   event.preventDefault();
   const password = $("#admin-password").value;
   if (state.setupRequired && password !== $("#admin-password-confirm").value) {
-    showAuthError("两次输入的密码不一致");
+    showAuthError(t("passwordMismatch"));
     return;
   }
   const button = $("#auth-submit");
@@ -145,20 +147,20 @@ function renderDashboard() {
 }
 
 function describeSyncError(value) {
-  const detail = String(value || "同步失败").trim() || "同步失败";
+  const detail = String(value || t("syncFailed")).trim() || t("syncFailed");
   let summary = detail;
   if (/rate.?limit|too many requests|\b429\b/i.test(detail)) {
-    summary = "X 请求频率受限，请稍后再试";
+    summary = t("rateLimited");
   } else if (/timeout|timed out/i.test(detail)) {
-    summary = "连接 X 超时，请检查网络或代理";
+    summary = t("xTimeout");
   } else if (/no active accounts|cookie|unauthori[sz]ed|forbidden|\b401\b|\b403\b/i.test(detail)) {
-    summary = "抓取凭证不可用或已经失效";
+    summary = t("credentialInvalid");
   } else if (/not found|does not exist|could not find user/i.test(detail)) {
-    summary = "X 账号不存在、已改名或暂时无法找到";
+    summary = t("accountMissing");
   } else if (/protected|private account/i.test(detail)) {
-    summary = "该账号受保护，当前凭证无权读取";
+    summary = t("protectedAccount");
   } else if (/proxy|connection refused|connection reset|network|dns/i.test(detail)) {
-    summary = "网络或代理连接失败";
+    summary = t("networkFailed");
   }
   return { summary, detail: summary === detail ? "" : detail };
 }
@@ -170,7 +172,7 @@ function renderSyncFailures() {
   panel.hidden = failures.length === 0;
   list.replaceChildren();
   if (!failures.length) return;
-  $("#sync-failure-count").textContent = `${failures.length} 个账号需要处理`;
+  $("#sync-failure-count").textContent = t("failuresNeedAction", { count: failures.length });
   for (const account of failures) {
     const item = document.createElement("article");
     item.className = "sync-failure-item";
@@ -186,16 +188,16 @@ function renderSyncFailures() {
     reason.textContent = issue.summary;
     const time = document.createElement("small");
     time.textContent = account.lastFailedAt
-      ? `失败于 ${relativeTime(account.lastFailedAt)} · ${new Date(account.lastFailedAt).toLocaleString("zh-CN")}`
-      : "失败时间未知";
+      ? t("failedAt", { relative: relativeTime(account.lastFailedAt), absolute: new Date(account.lastFailedAt).toLocaleString(i18n.localeTag()) })
+      : t("failureTimeUnknown");
     copy.append(title, reason);
     if (issue.detail) {
       const technical = document.createElement("code");
-      technical.textContent = `技术信息：${issue.detail}`;
+      technical.textContent = t("technicalInfo", { detail: issue.detail });
       copy.append(technical);
     }
     copy.append(time);
-    const retry = actionButton("重新更新", "sync-account", account.id);
+    const retry = actionButton(t("retrySync"), "sync-account", account.id);
     retry.className = "secondary-button sync-failure-retry";
     item.append(marker, copy, retry);
     list.append(item);
@@ -208,23 +210,23 @@ function renderStats() {
   const sync = state.health?.sync || {};
   const publicAccounts = state.accounts.filter((item) => item.isPublic).length;
   $("#stat-accounts").textContent = String(publicAccounts);
-  $("#stat-account-total").textContent = `共 ${state.accounts.length} 个 · ${state.members.length} 个会员`;
+  $("#stat-account-total").textContent = t("accountMemberTotal", { accounts: state.accounts.length, members: state.members.length });
   $("#stat-sessions").textContent = String(scraper.activeSessions || 0);
-  $("#stat-scraper-version").textContent = scraper.installed ? `twscrape v${scraper.version}` : "组件未安装";
-  $("#stat-schedule").textContent = state.settings?.scheduleEnabled ? `${state.settings.scheduleMinutes} 分钟` : "未开启";
-  $("#stat-next-run").textContent = scheduler.nextRunAt ? `下次 ${relativeTime(scheduler.nextRunAt)}` : "暂无计划";
-  $("#stat-sync").textContent = sync.running ? "运行中" : "空闲";
+  $("#stat-scraper-version").textContent = scraper.installed ? `twscrape v${scraper.version}` : t("componentMissing");
+  $("#stat-schedule").textContent = state.settings?.scheduleEnabled ? t("scheduleMinutes", { minutes: state.settings.scheduleMinutes }) : t("scheduleOff");
+  $("#stat-next-run").textContent = scheduler.nextRunAt ? t("nextRun", { time: relativeTime(scheduler.nextRunAt) }) : t("noSchedule");
+  $("#stat-sync").textContent = sync.running ? t("running") : t("idle");
   const last = scheduler.lastResult;
-  $("#stat-last-result").textContent = last ? `上次成功 ${last.succeeded || 0} / 失败 ${last.failed || 0}` : "无任务";
+  $("#stat-last-result").textContent = last ? t("lastResult", { ok: last.succeeded || 0, failed: last.failed || 0 }) : t("noTask");
   const healthPill = $("#scraper-health");
   if (!scraper.installed) {
-    healthPill.textContent = "组件未安装";
+    healthPill.textContent = t("componentMissing");
     healthPill.className = "pill bad";
   } else if (!scraper.activeSessions) {
-    healthPill.textContent = `v${scraper.version} · 无有效凭证`;
+    healthPill.textContent = t("noValidCredentials", { version: scraper.version });
     healthPill.className = "pill bad";
   } else {
-    healthPill.textContent = `v${scraper.version} · ${scraper.activeSessions} 个可用`;
+    healthPill.textContent = t("availableCredentials", { version: scraper.version, count: scraper.activeSessions });
     healthPill.className = "pill good";
   }
 }
@@ -233,15 +235,15 @@ async function inspectCookies() {
   const cookies = $("#session-cookies").value.trim();
   const status = $("#cookie-detection");
   if (!cookies) {
-    status.textContent = "等待粘贴 Cookie";
+    status.textContent = i18n.locale === "en" ? "Waiting for Cookie input" : "等待粘贴 Cookie";
     status.className = "cookie-detection";
     return;
   }
   try {
     const result = await api("/api/admin/cookies/inspect", { method: "POST", body: { cookies } });
     status.textContent = result.ready
-      ? `✓ ${result.format}：已自动找到 auth_token 和 ct0`
-      : `还缺少：${result.missing.join("、")}`;
+      ? t("cookiesFound", { format: result.format })
+      : t("cookiesMissing", { items: result.missing.join(i18n.locale === "en" ? ", " : "、") });
     status.className = `cookie-detection ${result.ready ? "good" : "bad"}`;
   } catch (error) {
     status.textContent = error.message;
@@ -252,22 +254,22 @@ async function inspectCookies() {
 async function addSession() {
   const label = $("#session-label").value.trim();
   const cookies = $("#session-cookies").value.trim();
-  if (!cookies) return showToast("请先粘贴 Cookie", true);
+  if (!cookies) return showToast(t("pasteCookie"), true);
   const button = $("#add-session");
   const original = button.textContent;
   button.disabled = true;
-  button.textContent = "正在向 X 验证…";
+  button.textContent = t("validatingX");
   try {
     const item = await api("/api/admin/scraper-sessions", {
       method: "POST", body: { label, cookies },
     });
     $("#session-label").value = "";
     $("#session-cookies").value = "";
-    $("#cookie-detection").textContent = "验证通过，原始 Cookie 已从表单清除";
+    $("#cookie-detection").textContent = t("cookieValidated");
     $("#cookie-detection").className = "cookie-detection good";
     await reloadSessionsAndHealth();
     const username = item.validation?.username ? ` @${item.validation.username}` : "";
-    showToast(`凭证验证有效并已保存${username}`);
+    showToast(t("credentialSaved", { username }));
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -282,7 +284,7 @@ function renderSessions() {
   if (!state.sessions.length) {
     const empty = document.createElement("div");
     empty.className = "session-empty";
-    empty.textContent = "尚无抓取凭证。粘贴完整 Cookie 后，系统会自动提取并验证。";
+    empty.textContent = t("noCredentials");
     list.append(empty);
     return;
   }
@@ -297,16 +299,16 @@ function renderSessions() {
     name.textContent = item.label;
     const detail = document.createElement("small");
     if (item.credentialState === "valid") {
-      detail.textContent = `已验证${item.verifiedUsername ? ` · @${item.verifiedUsername}` : ""}${item.verifiedAt ? ` · ${relativeTime(item.verifiedAt)}` : ""} · 已请求 ${item.totalRequests} 次`;
+      detail.textContent = t("verifiedDetail", { username: item.verifiedUsername ? ` · @${item.verifiedUsername}` : "", time: item.verifiedAt ? ` · ${relativeTime(item.verifiedAt)}` : "", count: item.totalRequests });
     } else if (item.credentialState === "invalid") {
-      detail.textContent = "验证失败，请导入新的 Cookie";
+      detail.textContent = t("validationFailed");
     } else {
-      detail.textContent = "旧凭证尚未在线验证";
+      detail.textContent = t("legacyCredential");
     }
     copy.append(name, detail);
     const actions = document.createElement("div");
     actions.className = "row-actions";
-    actions.append(actionButton("重新验证", "validate-session", item.label), actionButton("删除", "delete-session", item.label, true));
+    actions.append(actionButton(t("validateAgain"), "validate-session", item.label), actionButton(t("deleteAction"), "delete-session", item.label, true));
     row.append(dot, copy, actions);
     list.append(row);
   }
@@ -320,11 +322,11 @@ async function handleSessionAction(event) {
   try {
     if (button.dataset.sessionAction === "validate-session") {
       await api(`/api/admin/scraper-sessions/${encodeURIComponent(label)}/validate`, { method: "POST", body: {} });
-      showToast(`“${label}”验证有效`);
+      showToast(t("credentialValid", { label }));
     } else {
-      if (!window.confirm(`删除抓取凭证“${label}”？`)) return;
+      if (!window.confirm(t("deleteCredential", { label }))) return;
       await api(`/api/admin/scraper-sessions/${encodeURIComponent(label)}`, { method: "DELETE" });
-      showToast("抓取凭证已删除");
+      showToast(t("credentialDeleted"));
     }
     await reloadSessionsAndHealth();
   } catch (error) {
@@ -354,7 +356,7 @@ async function addAccount(event) {
     const account = await api("/api/admin/accounts", { method: "POST", body: { username } });
     input.value = "";
     await reloadAccounts();
-    showToast(`已添加 @${account.username}，可执行首次更新`);
+    showToast(t("accountAdded", { username: account.username }));
   } catch (error) { showToast(error.message, true); }
 }
 
@@ -364,7 +366,7 @@ function renderAccounts() {
   if (!state.accounts.length) {
     const empty = document.createElement("div");
     empty.className = "admin-empty";
-    empty.textContent = "尚未添加阅读用户。";
+    empty.textContent = t("noAccounts");
     list.append(empty);
     return;
   }
@@ -382,34 +384,38 @@ function renderAccounts() {
     const copy = document.createElement("div");
     copy.className = "admin-account-copy";
     const title = document.createElement("strong");
-    title.textContent = `${account.displayName} @${account.username}${account.isPublic ? "" : " · 仅管理可见"}`;
+    title.textContent = `${account.displayName} @${account.username}${account.isPublic ? "" : t("adminOnlySuffix")}`;
     const meta = document.createElement("small");
-    meta.textContent = `${account.tweetCount || 0} 条内容 · ${account.mediaCount || 0} 个媒体 · ${account.lastSyncedAt ? `更新于 ${relativeTime(account.lastSyncedAt)}` : "尚未更新"}`;
+    meta.textContent = t("accountMeta", {
+      tweets: account.tweetCount || 0,
+      media: account.mediaCount || 0,
+      updated: account.lastSyncedAt ? t("updatedAt", { time: relativeTime(account.lastSyncedAt) }) : t("awaitingUpdate"),
+    });
     const error = document.createElement("span");
     error.className = account.lastError ? "account-error" : "account-cursor";
     if (account.lastError) {
-      error.textContent = `抓取失败：${describeSyncError(account.lastError).summary}`;
+      error.textContent = t("syncFailure", { error: describeSyncError(account.lastError).summary });
       error.title = account.lastError;
     } else {
-      error.textContent = account.lastTweetId ? `增量游标 ${account.lastTweetId}` : "首次更新会读取最近内容";
+      error.textContent = account.lastTweetId ? t("cursor", { id: account.lastTweetId }) : t("firstSyncHint");
     }
     copy.append(title, meta, error);
     const options = document.createElement("div");
     options.className = "account-option-checks";
-    options.innerHTML = `<label class="public-option"><input type="checkbox" data-option="public" ${account.isPublic ? "checked" : ""}> 公开展示</label><label><input type="checkbox" data-option="replies" ${account.includeReplies ? "checked" : ""}> 回复</label><label><input type="checkbox" data-option="reposts" ${account.includeReposts ? "checked" : ""}> 转发</label>`;
+    options.innerHTML = `<label class="public-option"><input type="checkbox" data-option="public" ${account.isPublic ? "checked" : ""}> ${t("publicDisplay")}</label><label><input type="checkbox" data-option="replies" ${account.includeReplies ? "checked" : ""}> ${t("replies")}</label><label><input type="checkbox" data-option="reposts" ${account.includeReposts ? "checked" : ""}> ${t("reposts")}</label>`;
     const actions = document.createElement("div");
     actions.className = "row-actions account-row-actions";
     actions.append(
-      actionButton("保存设置", "save-account", account.id),
-      actionButton(account.syncing ? "更新中…" : "立即更新", "sync-account", account.id),
-      actionButton("删除", "delete-account", account.id, true),
+      actionButton(t("saveSettings"), "save-account", account.id),
+      actionButton(account.syncing ? t("syncing") : t("syncNow"), "sync-account", account.id),
+      actionButton(t("deleteAction"), "delete-account", account.id, true),
     );
     const preview = document.createElement("a");
     preview.className = "text-button button-link";
     preview.href = `/reader?account=${account.id}`;
     preview.target = "_blank";
     preview.rel = "noopener noreferrer";
-    preview.textContent = "预览";
+    preview.textContent = t("preview");
     actions.prepend(preview);
     if (account.syncing) actions.querySelector('[data-account-action="sync-account"]').disabled = true;
     card.dataset.accountId = String(account.id);
@@ -458,7 +464,7 @@ async function addMember(event) {
     $("#new-member-username").value = "";
     $("#new-member-password").value = "";
     await reloadMembers();
-    showToast(`会员 ${username} 已创建，请为其分配可查看用户`);
+    showToast(t("memberCreated", { username }));
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -472,7 +478,7 @@ function renderMembers() {
   if (!state.members.length) {
     const empty = document.createElement("div");
     empty.className = "admin-empty";
-    empty.textContent = "尚未创建会员。会员登录后只能看到公开用户和分配给自己的非公开用户。";
+    empty.textContent = t("noMembers");
     list.append(empty);
     return;
   }
@@ -490,9 +496,12 @@ function renderMembers() {
     title.textContent = member.username;
     const meta = document.createElement("small");
     meta.textContent = member.lastLoginAt
-      ? `上次登录 ${relativeTime(member.lastLoginAt)}`
-      : `创建于 ${relativeTime(member.createdAt)}`;
-    if (draft) meta.textContent += " · 有未保存更改";
+      ? t("lastLogin", { time: relativeTime(member.lastLoginAt) })
+      : t("createdAt", { time: relativeTime(member.createdAt) });
+    if (draft) {
+      meta.textContent += ` · ${t("unsavedChanges")}`;
+      meta.dataset.unsaved = "true";
+    }
     identity.append(title, meta);
     const active = document.createElement("label");
     active.className = "member-active-control";
@@ -500,19 +509,19 @@ function renderMembers() {
     activeInput.type = "checkbox";
     activeInput.dataset.memberActive = "";
     activeInput.checked = Boolean(draft?.active ?? member.active);
-    active.append(activeInput, document.createTextNode(" 允许登录"));
+    active.append(activeInput, document.createTextNode(` ${t("allowLogin")}`));
     heading.append(identity, active);
 
     const access = document.createElement("div");
     access.className = "member-access-block";
     const accessTitle = document.createElement("strong");
-    accessTitle.textContent = "可查看的用户";
+    accessTitle.textContent = t("visibleAccounts");
     const choices = document.createElement("div");
     choices.className = "member-account-choices";
     if (!state.accounts.length) {
       const none = document.createElement("span");
       none.className = "member-no-accounts";
-      none.textContent = "请先添加抓取用户";
+      none.textContent = t("addAccountsFirst");
       choices.append(none);
     }
     for (const account of state.accounts) {
@@ -521,7 +530,7 @@ function renderMembers() {
       input.type = "checkbox";
       input.dataset.memberAccountId = String(account.id);
       input.checked = selectedAccountIds.includes(account.id);
-      const suffix = account.isPublic ? "（公开）" : "（非公开）";
+      const suffix = account.isPublic ? t("publicSuffix") : t("privateSuffix");
       label.append(input, document.createTextNode(` @${account.username}${suffix}`));
       choices.append(label);
     }
@@ -532,14 +541,14 @@ function renderMembers() {
     const password = document.createElement("input");
     password.type = "password";
     password.autocomplete = "new-password";
-    password.placeholder = "留空不改密码；输入新密码可重置";
+    password.placeholder = t("resetPasswordPlaceholder");
     password.dataset.memberPassword = "";
     password.value = draft?.password || "";
     const actions = document.createElement("div");
     actions.className = "row-actions";
     actions.append(
-      memberActionButton("保存权限", "save-member", member.id),
-      memberActionButton("删除会员", "delete-member", member.id, true),
+      memberActionButton(t("savePermissions"), "save-member", member.id),
+      memberActionButton(t("deleteMember"), "delete-member", member.id, true),
     );
     footer.append(password, actions);
     card.append(heading, access, footer);
@@ -564,7 +573,10 @@ function rememberMemberDraft(event) {
   state.memberDrafts.set(id, readMemberDraft(card));
   card.classList.add("has-unsaved");
   const meta = card.querySelector(".admin-member-heading small");
-  if (meta && !meta.textContent.includes("有未保存更改")) meta.textContent += " · 有未保存更改";
+  if (meta && !meta.dataset.unsaved) {
+    meta.textContent += ` · ${t("unsavedChanges")}`;
+    meta.dataset.unsaved = "true";
+  }
 }
 
 async function handleMemberAction(event) {
@@ -588,14 +600,14 @@ async function handleMemberAction(event) {
       });
       state.members = state.members.map((item) => item.id === id ? saved : item);
       state.memberDrafts.delete(id);
-      showToast(`会员 ${member.username} 的权限已保存`);
+      showToast(t("permissionsSaved", { username: member.username }));
     } else {
-      const confirmation = window.prompt(`删除会员 ${member.username}？请输入会员名确认：`);
+      const confirmation = window.prompt(t("confirmDeleteMember", { username: member.username }));
       if (confirmation !== member.username) return;
       await api(`/api/admin/members/${id}`, { method: "DELETE" });
       state.memberDrafts.delete(id);
       state.members = state.members.filter((item) => item.id !== id);
-      showToast(`会员 ${member.username} 已删除`);
+      showToast(t("memberDeleted", { username: member.username }));
     }
     renderMembers();
     renderStats();
@@ -625,10 +637,10 @@ async function handleAccountAction(event) {
     if (action === "sync-account") {
       const result = await api(`/api/admin/accounts/${id}/sync`, { method: "POST", body: {} });
       const notice = result.notification?.sent === false
-        ? `；Bark 失败：${result.notification.error}`
+        ? t("barkFailed", { error: result.notification.error })
         : "";
       showToast(
-        `@${account.username} 更新完成：新增 ${result.inserted} 条，媒体 ${result.mediaDownloaded} 个${notice}`,
+        t("syncAccountDone", { username: account.username, inserted: result.inserted, media: result.mediaDownloaded, notice }),
         Boolean(notice),
       );
     } else if (action === "save-account") {
@@ -641,17 +653,17 @@ async function handleAccountAction(event) {
           isPublic: card.querySelector('[data-option="public"]').checked,
         },
       });
-      showToast("用户设置已保存");
+      showToast(t("accountSettingsSaved"));
     } else {
-      const confirmation = window.prompt(`这会删除 @${account.username} 的数据库记录和本地媒体。请输入账号名确认：`);
+      const confirmation = window.prompt(t("confirmDeleteAccount", { username: account.username }));
       if (confirmation !== account.username) return;
       await api(`/api/admin/accounts/${id}`, { method: "DELETE" });
-      showToast(`@${account.username} 已删除`);
+      showToast(t("accountDeleted", { username: account.username }));
     }
     await reloadAccounts();
   } catch (error) {
     const message = action === "sync-account"
-      ? `@${account.username} 更新失败：${describeSyncError(error.message).summary}`
+      ? t("syncAccountFailed", { username: account.username, error: describeSyncError(error.message).summary })
       : error.message;
     showToast(message, true);
     await reloadAccounts().catch(() => {});
@@ -681,13 +693,13 @@ function fillSettings() {
   $("#bark-server-url").value = settings.barkServerUrl || "https://api.day.app";
   $("#bark-device-key").value = "";
   $("#bark-device-key").placeholder = settings.barkDeviceKeyConfigured
-    ? "已安全保存，留空不修改"
-    : "从 Bark App 复制 Device Key";
-  $("#bark-group").value = settings.barkGroup || "Incandescence";
+    ? t("keySavedPlaceholder")
+    : t("keyCopyPlaceholder");
+  $("#bark-group").value = settings.barkGroup || "XGlow";
   $("#site-base-url").value = settings.siteBaseUrl || "";
   $("#bark-key-state").textContent = settings.barkDeviceKeyConfigured
-    ? "Device Key 已保存且不会回传到网页。站点地址建议填写手机可访问的局域网地址。"
-    : "Device Key 尚未保存。站点地址建议填写其他设备可以访问的局域网地址。";
+    ? t("keySavedHelp")
+    : t("keyMissingHelp");
 }
 
 async function saveBark() {
@@ -701,17 +713,17 @@ async function saveBark() {
   };
   if (key) body.barkDeviceKey = key;
   if (body.barkEnabled && !key && !state.settings?.barkDeviceKeyConfigured) {
-    return showToast("开启 Bark 推送前请填写 Device Key", true);
+    return showToast(t("barkKeyRequired"), true);
   }
   button.disabled = true;
   try {
     state.settings = await api("/api/admin/settings", { method: "PUT", body });
     fillSettings();
     $("#bark-test-result").textContent = state.settings.barkEnabled
-      ? "设置已保存；仅在后续增量抓到新内容时推送"
-      : "设置已保存，Bark 推送当前关闭";
+      ? t("barkEnabledSaved")
+      : t("barkDisabledSaved");
     $("#bark-test-result").className = "good";
-    showToast("Bark 通知设置已保存");
+    showToast(t("barkSaved"));
   } catch (error) {
     $("#bark-test-result").textContent = error.message;
     $("#bark-test-result").className = "bad";
@@ -725,19 +737,19 @@ async function testBark() {
   const button = $("#test-bark");
   const resultNode = $("#bark-test-result");
   if ($("#bark-device-key").value.trim()) {
-    return showToast("Device Key 有未保存的修改，请先保存通知设置", true);
+    return showToast(t("unsavedKey"), true);
   }
   if (!state.settings?.barkDeviceKeyConfigured) {
-    return showToast("请先填写并保存 Bark Device Key", true);
+    return showToast(t("saveKeyFirst"), true);
   }
   button.disabled = true;
-  resultNode.textContent = "正在发送 Bark 测试通知…";
+  resultNode.textContent = t("sendingBarkTest");
   resultNode.className = "testing";
   try {
     const result = await api("/api/admin/bark/test", { method: "POST", body: {} });
-    resultNode.textContent = `测试推送已送达 · HTTP ${result.status} · ${result.elapsedMs} ms`;
+    resultNode.textContent = t("barkTestDelivered", { status: result.status, elapsed: result.elapsedMs });
     resultNode.className = "good";
-    showToast("Bark 测试通知已发送");
+    showToast(t("barkTestSent"));
   } catch (error) {
     resultNode.textContent = error.message;
     resultNode.className = "bad";
@@ -749,16 +761,16 @@ async function testBark() {
 
 async function clearBarkKey() {
   if (!state.settings?.barkDeviceKeyConfigured) return;
-  if (!window.confirm("清除已保存的 Bark Device Key 并关闭推送？")) return;
+  if (!window.confirm(t("confirmClearBark"))) return;
   try {
     state.settings = await api("/api/admin/settings", {
       method: "PUT",
       body: { barkEnabled: false, barkClearDeviceKey: true },
     });
     fillSettings();
-    $("#bark-test-result").textContent = "Bark Device Key 已清除";
+    $("#bark-test-result").textContent = t("barkKeyCleared");
     $("#bark-test-result").className = "good";
-    showToast("Bark 密钥已清除");
+    showToast(t("barkClearedToast"));
   } catch (error) {
     showToast(error.message, true);
   }
@@ -768,17 +780,17 @@ async function testProxy() {
   const proxyUrl = $("#proxy-url").value.trim();
   const button = $("#test-proxy");
   const resultNode = $("#proxy-test-result");
-  if (!proxyUrl) return showToast("请填写代理地址", true);
+  if (!proxyUrl) return showToast(t("proxyRequired"), true);
   button.disabled = true;
-  resultNode.textContent = "正在通过代理连接 X…";
+  resultNode.textContent = t("testingProxy");
   resultNode.className = "testing";
   try {
     const result = await api("/api/admin/proxy/test", {
       method: "POST", body: { proxyUrl },
     });
-    resultNode.textContent = `连接成功 · HTTP ${result.status} · ${result.elapsedMs} ms`;
+    resultNode.textContent = t("proxyConnected", { status: result.status, elapsed: result.elapsedMs });
     resultNode.className = "good";
-    showToast("代理可以访问 X");
+    showToast(t("proxyWorks"));
   } catch (error) {
     resultNode.textContent = error.message;
     resultNode.className = "bad";
@@ -799,10 +811,10 @@ async function saveProxy() {
     });
     fillSettings();
     $("#proxy-test-result").textContent = state.settings.proxyEnabled
-      ? "代理设置已保存；后续网络请求将使用此代理"
-      : "代理已关闭";
+      ? t("proxyEnabledSaved")
+      : t("proxyDisabled");
     $("#proxy-test-result").className = "good";
-    showToast("代理设置已保存");
+    showToast(t("proxySaved"));
   } catch (error) { showToast(error.message, true); }
   finally { button.disabled = false; }
 }
@@ -824,7 +836,7 @@ async function saveSettings() {
     });
     fillSettings();
     renderStats();
-    showToast("自动更新设置已保存");
+    showToast(t("schedulerSaved"));
   } catch (error) { showToast(error.message, true); }
   finally { button.disabled = false; }
 }
@@ -837,14 +849,14 @@ async function syncAll() {
     const notificationFailures = result.results.filter(
       (item) => item.notification?.sent === false,
     ).length;
-    const notice = notificationFailures ? `，Bark 失败 ${notificationFailures}` : "";
+    const notice = notificationFailures ? t("barkFailureCount", { count: notificationFailures }) : "";
     const failures = result.results.filter((item) => item.error);
-    const failedAccounts = failures.map((item) => `@${item.username || item.accountId}`).join("、");
+    const failedAccounts = failures.map((item) => `@${item.username || item.accountId}`).join(i18n.locale === "en" ? ", " : "、");
     await loadDashboard();
     showToast(
       failures.length
-        ? `更新完成：成功 ${result.succeeded}，失败 ${result.failed}（${failedAccounts}）；详情已列在页面顶部${notice}`
-        : `更新完成：成功 ${result.succeeded}，失败 ${result.failed}${notice}`,
+        ? t("syncAllFailures", { ok: result.succeeded, failed: result.failed, accounts: failedAccounts, notice })
+        : t("syncAllDone", { ok: result.succeeded, failed: result.failed, notice }),
       result.failed > 0 || notificationFailures > 0,
     );
   } catch (error) { showToast(error.message, true); }
@@ -875,7 +887,7 @@ async function refreshStatus() {
 
 function relativeTime(value) {
   const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(i18n.localeTag(), { numeric: "auto" });
   if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);
   if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
@@ -898,3 +910,11 @@ function showToast(message, error = false) {
 }
 
 initialize();
+window.addEventListener("xglow:localechange", () => {
+  if (!$("#auth-view").hidden) {
+    $("#auth-title").textContent = state.setupRequired ? t("setupAdmin") : (i18n.locale === "en" ? "Administrator sign in" : "管理员登录");
+    $("#auth-description").textContent = state.setupRequired ? t("setupDescription") : (i18n.locale === "en" ? "Sign in to manage X credentials, reading accounts, and automatic updates." : "登录后管理抓取凭证、阅读账号和自动更新。");
+    $("#auth-submit").textContent = state.setupRequired ? t("createAdmin") : (i18n.locale === "en" ? "Sign in" : "登录");
+  }
+  if (!$("#admin-app").hidden) renderDashboard();
+});

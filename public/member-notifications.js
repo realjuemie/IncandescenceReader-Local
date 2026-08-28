@@ -1,6 +1,8 @@
 "use strict";
 
 (() => {
+  const i18n = window.XGlowI18n;
+  const t = (key, variables) => i18n.t(key, variables);
   let notificationDialog = null;
   let passwordDialog = null;
   let currentApi = null;
@@ -11,7 +13,7 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "member-status-action";
-    button.textContent = "通知";
+    button.textContent = t("notification");
     button.addEventListener("click", () => open(api, showToast));
     return button;
   }
@@ -20,9 +22,9 @@
     const button = document.createElement("button");
     button.type = "button";
     button.className = "member-status-action member-id-action";
-    button.textContent = `ID：${member.username}`;
-    button.title = "点击修改会员密码";
-    button.setAttribute("aria-label", `会员 ID ${member.username}，点击修改密码`);
+    button.textContent = i18n.locale === "en" ? `ID: ${member.username}` : `ID：${member.username}`;
+    button.title = t("changePasswordTitle");
+    button.setAttribute("aria-label", t("memberIdAria", { id: member.username }));
     button.addEventListener("click", () => openPassword(member, api, showToast));
     return button;
   }
@@ -34,26 +36,26 @@
     notificationDialog.innerHTML = `
       <form method="dialog" class="member-notification-card" id="member-notification-form">
         <header>
-          <div><span class="eyebrow">PERSONAL ALERTS</span><h2>我的 Bark 通知</h2></div>
-          <button type="button" class="member-notification-close" aria-label="关闭">×</button>
+          <div><span class="eyebrow">PERSONAL ALERTS</span><h2>${t("myBark")}</h2></div>
+          <button type="button" class="member-notification-close" aria-label="${i18n.locale === "en" ? "Close" : "关闭"}">×</button>
         </header>
-        <p class="member-notification-intro">只向你的 Bark 推送所选账号的新内容。Device Key 仅保存在本站，不会回传到网页。</p>
-        <label class="member-notification-toggle"><input type="checkbox" id="member-bark-enabled"> 开启我的通知</label>
+        <p class="member-notification-intro">${t("personalAlertIntro")}</p>
+        <label class="member-notification-toggle"><input type="checkbox" id="member-bark-enabled"> ${t("enableMyAlerts")}</label>
         <div class="member-notification-fields">
-          <label>Bark 服务器地址<input type="url" id="member-bark-server" autocomplete="off" spellcheck="false" placeholder="https://api.day.app"></label>
-          <label>Device Key<input type="password" id="member-bark-key" autocomplete="new-password" spellcheck="false" placeholder="从 Bark App 复制"></label>
-          <label>通知分组<input type="text" id="member-bark-group" maxlength="64" placeholder="Incandescence"></label>
+          <label>${i18n.locale === "en" ? "Bark server URL" : "Bark 服务器地址"}<input type="url" id="member-bark-server" autocomplete="off" spellcheck="false" placeholder="https://api.day.app"></label>
+          <label>Device Key<input type="password" id="member-bark-key" autocomplete="new-password" spellcheck="false" placeholder="${t("copyFromBark")}"></label>
+          <label>${i18n.locale === "en" ? "Notification group" : "通知分组"}<input type="text" id="member-bark-group" maxlength="64" placeholder="XGlow"></label>
         </div>
         <fieldset class="member-notification-accounts">
-          <legend>选择需要通知的账号</legend>
+          <legend>${t("chooseAlertAccounts")}</legend>
           <div id="member-bark-accounts"></div>
         </fieldset>
         <div class="member-notification-result" id="member-bark-result" role="status"></div>
         <footer>
-          <button type="button" class="text-button danger-text" id="member-bark-clear">清除密钥</button>
+          <button type="button" class="text-button danger-text" id="member-bark-clear">${i18n.locale === "en" ? "Clear key" : "清除密钥"}</button>
           <span></span>
-          <button type="button" class="secondary-button" id="member-bark-test">测试</button>
-          <button type="submit" class="primary-button" id="member-bark-save">保存</button>
+          <button type="button" class="secondary-button" id="member-bark-test">${t("test")}</button>
+          <button type="submit" class="primary-button" id="member-bark-save">${t("save")}</button>
         </footer>
       </form>`;
     document.body.append(notificationDialog);
@@ -73,7 +75,7 @@
     currentApi = api;
     currentToast = showToast;
     const modal = ensureDialog();
-    setResult("正在读取通知设置…");
+    setResult(t("loadingNotifications"));
     modal.showModal();
     try {
       settings = await currentApi("/api/member/notifications");
@@ -88,8 +90,8 @@
     notificationDialog.querySelector("#member-bark-server").value = settings.serverUrl || "https://api.day.app";
     const key = notificationDialog.querySelector("#member-bark-key");
     key.value = "";
-    key.placeholder = settings.deviceKeyConfigured ? "已安全保存，留空不修改" : "从 Bark App 复制";
-    notificationDialog.querySelector("#member-bark-group").value = settings.group || "Incandescence";
+    key.placeholder = settings.deviceKeyConfigured ? t("savedKeyShort") : t("copyFromBark");
+    notificationDialog.querySelector("#member-bark-group").value = settings.group || "XGlow";
     const selected = new Set(settings.accountIds || []);
     const accounts = notificationDialog.querySelector("#member-bark-accounts");
     accounts.replaceChildren();
@@ -99,17 +101,18 @@
       input.type = "checkbox";
       input.value = String(account.id);
       input.checked = selected.has(account.id);
-      const privacy = account.isPublic ? "公开" : "会员专属";
-      label.append(input, document.createTextNode(` ${account.displayName} · @${account.username}（${privacy}）`));
+      const privacy = account.isPublic ? t("public") : t("memberOnly");
+      const suffix = i18n.locale === "en" ? ` (${privacy})` : `（${privacy}）`;
+      label.append(input, document.createTextNode(` ${account.displayName} · @${account.username}${suffix}`));
       accounts.append(label);
     }
     if (!(settings.availableAccounts || []).length) {
       const empty = document.createElement("p");
-      empty.textContent = "当前没有可订阅的账号。";
+      empty.textContent = t("noSubscriptions");
       accounts.append(empty);
     }
     notificationDialog.querySelector("#member-bark-clear").hidden = !settings.deviceKeyConfigured;
-    setResult(settings.deviceKeyConfigured ? "Device Key 已保存，可直接修改订阅账号。" : "请先填写 Bark Device Key。", false);
+    setResult(settings.deviceKeyConfigured ? t("keySavedSubscriptions") : t("enterBarkKey"), false);
   }
 
   async function save(event) {
@@ -125,12 +128,12 @@
     };
     if (key) body.deviceKey = key;
     button.disabled = true;
-    setResult("正在保存…");
+    setResult(t("saving"));
     try {
       settings = await currentApi("/api/member/notifications", { method: "PUT", body });
       fill();
-      setResult(settings.enabled ? "已开启所选账号的新内容通知。" : "设置已保存，通知当前关闭。", false);
-      currentToast?.("个人 Bark 通知设置已保存");
+      setResult(settings.enabled ? t("memberAlertsEnabled") : t("memberAlertsDisabled"), false);
+      currentToast?.(t("memberAlertsSaved"));
     } catch (error) {
       setResult(error.message, true);
       currentToast?.(error.message, true);
@@ -141,14 +144,14 @@
 
   async function test() {
     const key = notificationDialog.querySelector("#member-bark-key").value.trim();
-    if (key) return setResult("Device Key 有未保存的修改，请先保存。", true);
-    if (!settings?.deviceKeyConfigured) return setResult("请先填写并保存 Device Key。", true);
+    if (key) return setResult(t("unsavedMemberKey"), true);
+    if (!settings?.deviceKeyConfigured) return setResult(t("saveMemberKeyFirst"), true);
     const button = notificationDialog.querySelector("#member-bark-test");
     button.disabled = true;
-    setResult("正在发送测试通知…");
+    setResult(t("sendingTest"));
     try {
       const result = await currentApi("/api/member/notifications/test", { method: "POST", body: {} });
-      setResult(`测试通知已送达 · HTTP ${result.status} · ${result.elapsedMs} ms`, false);
+      setResult(t("testDelivered", { status: result.status, elapsed: result.elapsedMs }), false);
     } catch (error) {
       setResult(error.message, true);
     } finally {
@@ -157,7 +160,7 @@
   }
 
   async function clearKey() {
-    if (!settings?.deviceKeyConfigured || !window.confirm("清除你的 Bark Device Key 并关闭通知？")) return;
+    if (!settings?.deviceKeyConfigured || !window.confirm(t("confirmClearMemberKey"))) return;
     const selected = [...notificationDialog.querySelectorAll("#member-bark-accounts input:checked")]
       .map((input) => Number(input.value));
     try {
@@ -172,7 +175,7 @@
         },
       });
       fill();
-      setResult("Device Key 已清除，个人通知已关闭。", false);
+      setResult(t("memberKeyCleared"), false);
     } catch (error) {
       setResult(error.message, true);
     }
@@ -192,19 +195,19 @@
     passwordDialog.innerHTML = `
       <form class="member-notification-card" id="member-password-form">
         <header>
-          <div><span class="eyebrow">MEMBER SECURITY</span><h2>修改会员密码</h2></div>
-          <button type="button" class="member-notification-close" aria-label="关闭">×</button>
+          <div><span class="eyebrow">MEMBER SECURITY</span><h2>${t("changeMemberPassword")}</h2></div>
+          <button type="button" class="member-notification-close" aria-label="${i18n.locale === "en" ? "Close" : "关闭"}">×</button>
         </header>
-        <p class="member-notification-intro">当前会员 ID：<strong id="member-password-id"></strong>。修改后，其他设备上的旧登录会失效。</p>
+        <p class="member-notification-intro">${t("currentMemberIntro")}<strong id="member-password-id"></strong>${t("passwordChangeWarning")}</p>
         <div class="member-notification-fields member-password-fields">
-          <label>当前密码<input type="password" id="member-current-password" autocomplete="current-password" maxlength="256" required></label>
-          <label>新密码<input type="password" id="member-new-password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
-          <label>再次输入新密码<input type="password" id="member-confirm-password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+          <label>${t("currentPassword")}<input type="password" id="member-current-password" autocomplete="current-password" maxlength="256" required></label>
+          <label>${t("newPassword")}<input type="password" id="member-new-password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
+          <label>${t("confirmNewPassword")}<input type="password" id="member-confirm-password" autocomplete="new-password" minlength="8" maxlength="256" required></label>
         </div>
         <div class="member-notification-result" id="member-password-result" role="status"></div>
         <footer class="member-password-footer">
-          <button type="button" class="secondary-button" id="member-password-cancel">取消</button>
-          <button type="submit" class="primary-button" id="member-password-save">更新密码</button>
+          <button type="button" class="secondary-button" id="member-password-cancel">${t("cancel")}</button>
+          <button type="submit" class="primary-button" id="member-password-save">${t("updatePassword")}</button>
         </footer>
       </form>`;
     document.body.append(passwordDialog);
@@ -242,19 +245,19 @@
     const newPassword = passwordDialog.querySelector("#member-new-password").value;
     const confirmation = passwordDialog.querySelector("#member-confirm-password").value;
     if (newPassword !== confirmation) {
-      setPasswordResult("两次输入的新密码不一致。", true);
+      setPasswordResult(t("newPasswordMismatch"), true);
       return;
     }
     const button = passwordDialog.querySelector("#member-password-save");
     button.disabled = true;
-    setPasswordResult("正在更新密码…");
+    setPasswordResult(t("updatingPassword"));
     try {
       await currentApi("/api/member/password", {
         method: "PUT",
         body: { currentPassword, newPassword },
       });
       passwordDialog.close();
-      currentToast?.("会员密码已更新，其他设备需要重新登录");
+      currentToast?.(t("passwordUpdated"));
     } catch (error) {
       setPasswordResult(error.message, true);
     } finally {
@@ -268,6 +271,13 @@
     node.textContent = message || "";
     node.classList.toggle("bad", error);
   }
+
+  window.addEventListener("xglow:localechange", () => {
+    notificationDialog?.remove();
+    passwordDialog?.remove();
+    notificationDialog = null;
+    passwordDialog = null;
+  });
 
   window.MemberNotifications = { createButton, createIdentityButton };
 })();

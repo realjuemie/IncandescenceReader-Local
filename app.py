@@ -53,7 +53,7 @@ def main() -> None:
     scheduler.start()
     shown_host = "127.0.0.1" if host in ("0.0.0.0", "::") else host
     url = f"http://{shown_host}:{server.server_address[1]}"
-    print(f"Incandescence 本地阅读器已启动：{url}")
+    print(f"X拾光 XGlow 本地阅读器已启动：{url}")
     print(f"数据目录：{data_dir}")
     if os.environ.get("NO_BROWSER") != "1" and sys.stdout.isatty():
         threading.Timer(0.8, lambda: webbrowser.open(url)).start()

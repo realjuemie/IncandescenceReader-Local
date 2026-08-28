@@ -4,15 +4,18 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="color-scheme" content="light">
-  <title>Incandescence · 管理后台</title>
-  <link rel="icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
-  <link rel="shortcut icon" href="/favicon.svg?v=4.6.0" type="image/svg+xml">
-  <link rel="stylesheet" href="/styles.css?v=4.10.9">
+  <title>X拾光 · 管理后台</title>
+  <link rel="icon" href="/xglow-favicon.png?v=4.11.3" type="image/png">
+  <link rel="shortcut icon" href="/xglow-favicon.png?v=4.11.3" type="image/png">
+  <link rel="stylesheet" href="/styles.css?v=4.11.3">
 </head>
 <body class="admin-body">
   <main class="admin-auth-view" id="auth-view">
     <section class="admin-auth-card">
-      <img class="brand-mark brand-logo large" src="/favicon.svg?v=4.6.0" alt="">
+      <div class="admin-auth-brand-row">
+        <img class="brand-mark brand-logo large" src="/xglow-icon.png?v=4.11.3" alt="">
+        <button class="language-toggle" type="button" data-language-toggle><span aria-hidden="true">文</span><b data-language-label>EN</b></button>
+      </div>
       <div class="eyebrow">ADMIN CONTROL</div>
       <h1 id="auth-title">管理员登录</h1>
       <p id="auth-description">登录后管理抓取凭证、阅读账号和自动更新。</p>
@@ -33,10 +36,11 @@
   <div class="admin-app" id="admin-app" hidden>
     <header class="admin-topbar">
       <a class="admin-brand" href="/admin">
-        <img class="brand-mark brand-logo" src="/favicon.svg?v=4.6.0" alt="">
-        <span><strong>Incandescence</strong><small>管理后台</small></span>
+        <img class="brand-mark brand-logo" src="/xglow-icon.png?v=4.11.3" alt="">
+        <span><strong>X拾光</strong><small>XGlow · 管理后台</small></span>
       </a>
       <nav>
+        <button class="language-toggle" type="button" data-language-toggle><span aria-hidden="true">文</span><b data-language-label>EN</b></button>
         <a class="secondary-button button-link" href="#user-management">用户管理</a>
         <a class="secondary-button button-link" href="#member-management">会员管理</a>
         <a class="secondary-button button-link" href="#notification-panel">通知设置</a>
@@ -116,7 +120,7 @@
                 <input type="password" id="bark-device-key" autocomplete="new-password" spellcheck="false" placeholder="从 Bark App 复制，留空不修改">
               </label>
               <label>通知分组
-                <input type="text" id="bark-group" maxlength="64" placeholder="Incandescence">
+                <input type="text" id="bark-group" maxlength="64" placeholder="XGlow">
               </label>
               <label>站点访问地址
                 <input type="url" id="site-base-url" autocomplete="off" spellcheck="false" placeholder="例如 http://192.168.1.20:8787">
@@ -223,6 +227,7 @@
   </div>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/admin.js?v=4.10.9" defer></script>
+  <script src="/i18n.js?v=4.11.3" defer></script>
+  <script src="/admin.js?v=4.11.3" defer></script>
 </body>
 </html>

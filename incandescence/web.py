@@ -120,7 +120,7 @@ def create_server(address: tuple[str, int], application: Application) -> Threadi
 
 class RequestHandler(BaseHTTPRequestHandler):
     app: Application
-    server_version = "IncandescenceLocal/3"
+    server_version = "XGlowLocal/4"
 
     def do_GET(self) -> None:  # noqa: N802
         try:

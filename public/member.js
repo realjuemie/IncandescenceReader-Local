@@ -1,6 +1,8 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
+const i18n = window.XGlowI18n;
+const t = (key, variables) => i18n.t(key, variables);
 
 async function api(path, options = {}) {
   const init = { ...options, headers: { ...(options.headers || {}) } };
@@ -11,7 +13,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, init);
   let payload = {};
   try { payload = await response.json(); } catch (_) { /* empty response */ }
-  if (!response.ok) throw new Error(payload.error || `请求失败 (${response.status})`);
+  if (!response.ok) throw new Error(i18n.localizeError(payload.error) || t("requestFailed", { status: response.status }));
   return payload;
 }
 

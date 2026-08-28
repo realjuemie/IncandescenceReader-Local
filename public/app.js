@@ -1,6 +1,8 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
+const i18n = window.XGlowI18n;
+const t = (key, variables) => i18n.t(key, variables);
 const state = {
   accounts: [], selectedId: null, cursor: null, kind: "all", query: "",
   year: "", month: "", availableMonths: [], loading: false,
@@ -16,7 +18,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, init);
   let payload = {};
   try { payload = await response.json(); } catch (_) { /* empty response */ }
-  if (!response.ok) throw new Error(payload.error || `请求失败 (${response.status})`);
+  if (!response.ok) throw new Error(i18n.localizeError(payload.error) || t("requestFailed", { status: response.status }));
   return payload;
 }
 
@@ -81,7 +83,7 @@ function bindEvents() {
   });
   $("#timeline").addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-lightbox-url]");
-    if (trigger) openLightbox(trigger.dataset.lightboxUrl, trigger.dataset.lightboxAlt || "内容图片", trigger);
+    if (trigger) openLightbox(trigger.dataset.lightboxUrl, trigger.dataset.lightboxAlt || t("contentImage"), trigger);
   });
   $("#lightbox-close").addEventListener("click", closeLightbox);
   $("#image-lightbox").addEventListener("click", (event) => {
@@ -108,13 +110,13 @@ function renderAccounts() {
     const name = document.createElement("strong");
     name.textContent = account.displayName;
     const handle = document.createElement("small");
-    handle.textContent = `@${account.username} · ${account.tweetCount || 0} 条`;
+    handle.textContent = t("accountItems", { username: account.username, count: formatCount(account.tweetCount || 0) });
     copy.append(name, handle);
     button.append(copy);
     if (!account.isPublic) {
       const privacy = document.createElement("span");
       privacy.className = "account-privacy";
-      privacy.textContent = state.member ? "会员可见" : "仅管理";
+      privacy.textContent = state.member ? t("memberVisible") : t("adminShort");
       button.append(privacy);
     }
     button.addEventListener("click", () => selectAccount(account.id));
@@ -131,7 +133,7 @@ function renderMemberStatus() {
     );
     const logout = document.createElement("button");
     logout.type = "button";
-    logout.textContent = "退出";
+    logout.textContent = t("signOut");
     logout.addEventListener("click", async () => {
       await api("/api/member/logout", { method: "POST", body: {} });
       location.reload();
@@ -141,7 +143,7 @@ function renderMemberStatus() {
   } else {
     const login = document.createElement("a");
     login.href = `/login?redirect=${encodeURIComponent(location.pathname + location.search)}`;
-    login.textContent = "会员登录";
+    login.textContent = t("memberSignIn");
     container.append(login);
   }
 }
@@ -187,12 +189,12 @@ function renderDateFilters() {
     state.year = "";
     state.month = "";
   }
-  yearSelect.replaceChildren(new Option("全部年份", ""));
+  yearSelect.replaceChildren(new Option(i18n.locale === "en" ? "All years" : "全部年份", ""));
   for (const year of years) {
     const count = state.availableMonths
       .filter((item) => String(item.year) === year)
       .reduce((total, item) => total + Number(item.count || 0), 0);
-    yearSelect.add(new Option(`${year}年 · ${count}条`, year));
+    yearSelect.add(new Option(t("yearOption", { year, count: formatCount(count) }), year));
   }
   yearSelect.value = state.year;
 
@@ -201,9 +203,9 @@ function renderDateFilters() {
     : [];
   const validMonths = available.map((item) => String(item.month));
   if (state.month && !validMonths.includes(state.month)) state.month = "";
-  monthSelect.replaceChildren(new Option("全部月份", ""));
+  monthSelect.replaceChildren(new Option(i18n.locale === "en" ? "All months" : "全部月份", ""));
   for (const item of available) {
-    monthSelect.add(new Option(`${item.month}月 · ${item.count}条`, String(item.month)));
+    monthSelect.add(new Option(t("monthOption", { month: item.month, count: formatCount(item.count) }), String(item.month)));
   }
   monthSelect.value = state.month;
   monthSelect.disabled = !state.year;
@@ -217,7 +219,7 @@ function renderProfile() {
   if (!account) return;
   $("#profile-name").textContent = account.displayName;
   $("#profile-handle").textContent = `@${account.username}`;
-  $("#profile-bio").textContent = account.bio || "暂无个人简介";
+  $("#profile-bio").textContent = account.bio || t("noBio");
   $("#profile-avatar").replaceChildren(createAvatar(account));
   const banner = $("#profile-banner");
   if (account.bannerUrl) {
@@ -229,22 +231,22 @@ function renderProfile() {
   }
   const metrics = account.metrics || {};
   $("#profile-meta").innerHTML = [
-    `<span><strong>${formatCount(account.tweetCount || 0)}</strong> 本站内容</span>`,
-    `<span><strong>${formatCount(account.mediaCount || 0)}</strong> 本站媒体</span>`,
-    metrics.followers != null ? `<span><strong>${formatCount(metrics.followers)}</strong> 关注者</span>` : "",
+    `<span><strong>${formatCount(account.tweetCount || 0)}</strong> ${t("localContent")}</span>`,
+    `<span><strong>${formatCount(account.mediaCount || 0)}</strong> ${t("localMedia")}</span>`,
+    metrics.followers != null ? `<span><strong>${formatCount(metrics.followers)}</strong> ${t("followers")}</span>` : "",
   ].join("");
   $("#profile-tracking").textContent = account.trackingStartedAt
-    ? `本站自 ${formatTrackingStart(account.trackingStartedAt)} 开始抓取`
-    : "抓取起始时间暂不可用";
-  $("#public-updated").textContent = account.lastSyncedAt ? `更新于 ${relativeTime(account.lastSyncedAt)}` : "等待首次更新";
+    ? t("trackingSince", { time: formatTrackingStart(account.trackingStartedAt) })
+    : t("trackingUnavailable");
+  $("#public-updated").textContent = account.lastSyncedAt ? t("updatedAt", { time: relativeTime(account.lastSyncedAt) }) : t("awaitingUpdate");
 }
 
 function formatTrackingStart(value) {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "未知时间";
+  if (Number.isNaN(date.getTime())) return t("unknownTime");
   const hour = String(date.getHours()).padStart(2, "0");
   const minute = String(date.getMinutes()).padStart(2, "0");
-  return `${date.getFullYear()}年${date.getMonth() + 1}月${date.getDate()}日 ${hour}时${minute}分`;
+  return t("trackingDate", { year: date.getFullYear(), month: date.getMonth() + 1, day: date.getDate(), hour, minute });
 }
 
 function createAvatar(account, className = "") {
@@ -288,8 +290,8 @@ async function loadTweets(append) {
       const empty = document.createElement("div");
       empty.className = "timeline-empty";
       empty.textContent = state.query || state.year
-        ? "当前搜索或时间范围内没有内容"
-        : "这个账号还没有已抓取的内容";
+        ? t("noFilteredContent")
+        : t("noAccountContent");
       $("#timeline").append(empty);
     }
   } catch (error) {
@@ -360,8 +362,8 @@ function renderTweetEntry(tweet, { stripReplyTarget = false } = {}) {
   time.rel = "noopener noreferrer";
   time.textContent = `· ${formatDate(tweet.createdAt)}`;
   head.append(name, handle, time);
-  if (tweet.isRepost) head.append(createBadge("转发"));
-  else if (tweet.isQuote) head.append(createBadge("引用"));
+  if (tweet.isRepost) head.append(createBadge(t("repost")));
+  else if (tweet.isQuote) head.append(createBadge(t("quote")));
   const text = document.createElement("div");
   text.className = "tweet-text";
   let displayText = String(tweet.text || "");
@@ -381,7 +383,7 @@ function renderTweetEntry(tweet, { stripReplyTarget = false } = {}) {
 function renderReplyContext(tweet) {
   const context = document.createElement("div");
   context.className = "reply-context";
-  context.append(document.createTextNode("回复给 "));
+  context.append(document.createTextNode(t("replyingTo")));
   if (tweet.replyToUsername) {
     const target = document.createElement("a");
     target.href = `https://x.com/${encodeURIComponent(tweet.replyToUsername)}`;
@@ -390,7 +392,7 @@ function renderReplyContext(tweet) {
     target.textContent = `@${tweet.replyToUsername}`;
     context.append(target);
   } else {
-    context.append(document.createTextNode("对话中的用户"));
+    context.append(document.createTextNode(t("conversationUser")));
   }
   return context;
 }
@@ -441,18 +443,18 @@ function renderMedia(media) {
     if (!item.url) {
       const error = document.createElement("div");
       error.className = "media-error";
-      error.textContent = "媒体暂时不可用";
+      error.textContent = t("mediaUnavailable");
       wrap.append(error);
     } else if (item.type === "photo") {
       const button = document.createElement("button");
       button.type = "button";
       button.className = "media-image-button";
       button.dataset.lightboxUrl = item.url;
-      button.dataset.lightboxAlt = item.alt || "内容图片";
-      button.setAttribute("aria-label", "放大查看图片");
+      button.dataset.lightboxAlt = item.alt || t("contentImage");
+      button.setAttribute("aria-label", t("enlargeImage"));
       const image = document.createElement("img");
       image.src = item.url;
-      image.alt = item.alt || "内容图片";
+      image.alt = item.alt || t("contentImage");
       image.loading = "lazy";
       button.append(image);
       wrap.append(button);
@@ -501,19 +503,19 @@ function createIsolatedVideo(item, contain) {
   const launch = document.createElement("button");
   launch.type = "button";
   launch.className = "video-launch";
-  launch.setAttribute("aria-label", item.type === "animated_gif" ? "播放动图" : "播放视频");
+  launch.setAttribute("aria-label", item.type === "animated_gif" ? t("playGif") : t("playVideo"));
   const launchIcon = document.createElement("span");
   launchIcon.className = "video-launch-icon";
   launchIcon.textContent = "▶";
   const launchText = document.createElement("span");
   launchText.className = "video-launch-text";
-  launchText.textContent = item.type === "animated_gif" ? "动图" : "播放";
+  launchText.textContent = item.type === "animated_gif" ? t("gif") : t("play");
   launch.append(launchIcon, launchText);
   launch.addEventListener("click", startPlayback);
 
   const error = document.createElement("div");
   error.className = "video-error";
-  error.textContent = "视频暂时无法播放";
+  error.textContent = t("videoUnavailable");
   video.addEventListener("error", () => host.classList.add("media-video-error"));
   const controlsSlot = document.createElement("slot");
   root.append(stylesheet, video, controlsSlot, error);
@@ -543,7 +545,7 @@ function openLightbox(url, alt, trigger) {
   image.src = url;
   image.alt = alt;
   caption.textContent = alt;
-  caption.hidden = !alt || alt === "内容图片";
+  caption.hidden = !alt || alt === t("contentImage");
   lightbox.hidden = false;
   document.body.classList.add("lightbox-open");
   $("#lightbox-close").focus();
@@ -622,12 +624,12 @@ function toggleSidebar(open) {
 }
 
 function formatDate(value) {
-  return new Intl.DateTimeFormat("zh-CN", { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
+  return new Intl.DateTimeFormat(i18n.localeTag(), { year: "numeric", month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" }).format(new Date(value));
 }
 
 function relativeTime(value) {
   const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(i18n.localeTag(), { numeric: "auto" });
   if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);
   if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
@@ -638,9 +640,7 @@ function relativeTime(value) {
 
 function formatCount(value) {
   const number = Number(value || 0);
-  if (number >= 100000000) return `${(number / 100000000).toFixed(1)}亿`;
-  if (number >= 10000) return `${(number / 10000).toFixed(number >= 100000 ? 0 : 1)}万`;
-  return new Intl.NumberFormat("zh-CN").format(number);
+  return new Intl.NumberFormat(i18n.localeTag(), { notation: "compact", maximumFractionDigits: 1 }).format(number);
 }
 
 function showToast(message, error = false) {
@@ -653,3 +653,10 @@ function showToast(message, error = false) {
 }
 
 initialize();
+window.addEventListener("xglow:localechange", async () => {
+  renderMemberStatus();
+  renderAccounts();
+  renderProfile();
+  renderDateFilters();
+  if (state.selectedId) await loadTweets(false);
+});

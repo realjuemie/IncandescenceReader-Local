@@ -135,7 +135,7 @@ class Database:
                     bark_enabled INTEGER NOT NULL DEFAULT 0,
                     bark_server_url TEXT NOT NULL DEFAULT 'https://api.day.app',
                     bark_device_key TEXT NOT NULL DEFAULT '',
-                    bark_group TEXT NOT NULL DEFAULT 'Incandescence',
+                    bark_group TEXT NOT NULL DEFAULT 'XGlow',
                     last_login_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -182,7 +182,7 @@ class Database:
                 ("bark_enabled", "INTEGER NOT NULL DEFAULT 0"),
                 ("bark_server_url", "TEXT NOT NULL DEFAULT 'https://api.day.app'"),
                 ("bark_device_key", "TEXT NOT NULL DEFAULT ''"),
-                ("bark_group", "TEXT NOT NULL DEFAULT 'Incandescence'"),
+                ("bark_group", "TEXT NOT NULL DEFAULT 'XGlow'"),
             ):
                 if column not in member_columns:
                     db.execute(f"ALTER TABLE members ADD COLUMN {column} {definition}")
@@ -716,7 +716,7 @@ class Database:
             "enabled": bool(member.get("bark_enabled")),
             "server_url": str(member.get("bark_server_url") or "https://api.day.app"),
             "device_key": str(member.get("bark_device_key") or ""),
-            "group": str(member.get("bark_group") or "Incandescence"),
+            "group": str(member.get("bark_group") or "XGlow"),
             "account_ids": [
                 int(row["account_id"])
                 for row in rows

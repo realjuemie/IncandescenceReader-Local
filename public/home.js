@@ -1,6 +1,8 @@
 "use strict";
 
 const $ = (selector) => document.querySelector(selector);
+const i18n = window.XGlowI18n;
+const t = (key, variables) => i18n.t(key, variables);
 let toastTimer = null;
 let currentMember = null;
 const HOME_LAYOUT_KEY = "incandescence-home-layout";
@@ -43,7 +45,7 @@ async function api(path, options = {}) {
   const response = await fetch(path, init);
   let payload = {};
   try { payload = await response.json(); } catch (_) { /* empty response */ }
-  if (!response.ok) throw new Error(payload.error || `请求失败 (${response.status})`);
+  if (!response.ok) throw new Error(i18n.localizeError(payload.error) || t("requestFailed", { status: response.status }));
   return payload;
 }
 
@@ -61,7 +63,7 @@ async function loadDirectory() {
     renderSummary(accounts);
     renderAccounts(accounts);
     renderMemberStatus(memberStatus);
-    $("#home-refresh-time").textContent = `页面刷新于 ${formatClock(new Date())}`;
+    $("#home-refresh-time").textContent = t("refreshedAt", { time: formatClock(new Date()) });
   } catch (error) {
     showToast(error.message, true);
   }
@@ -69,6 +71,7 @@ async function loadDirectory() {
 
 function renderMemberStatus(status) {
   const container = $("#home-member-status");
+  document.body.classList.toggle("home-member-authenticated", Boolean(status.authenticated && status.member));
   container.replaceChildren();
   if (status.authenticated && status.member) {
     const identity = window.MemberNotifications.createIdentityButton(
@@ -77,7 +80,7 @@ function renderMemberStatus(status) {
     const logout = document.createElement("button");
     logout.type = "button";
     logout.className = "member-status-action";
-    logout.textContent = "退出";
+    logout.textContent = t("signOut");
     logout.addEventListener("click", async () => {
       await api("/api/member/logout", { method: "POST", body: {} });
       await loadDirectory();
@@ -87,7 +90,7 @@ function renderMemberStatus(status) {
   } else {
     const login = document.createElement("a");
     login.href = "/login?redirect=%2F";
-    login.textContent = "会员登录";
+    login.textContent = t("memberSignIn");
     container.append(login);
   }
 }
@@ -96,10 +99,14 @@ function renderSummary(accounts) {
   const latest = accounts.map((item) => item.lastSyncedAt).filter(Boolean).sort().at(-1);
   const publicCount = accounts.filter((item) => item.isPublic).length;
   const privateCount = accounts.length - publicCount;
-  const privateLabel = currentMember ? "会员专属" : "仅管理可见";
+  const privateLabel = currentMember ? t("memberOnly") : t("adminOnly");
   $("#home-summary").textContent = accounts.length
-    ? `${publicCount} 个公开账号${privateCount ? ` · ${privateCount} 个${privateLabel}` : ""} · ${latest ? `最近更新 ${relativeTime(latest)}` : "等待首次抓取"}`
-    : "管理员尚未添加公开账号";
+    ? t("publicSummary", {
+      publicCount,
+      privatePart: privateCount ? t("privateSummaryPart", { privateCount, label: privateLabel }) : "",
+      latestPart: latest ? t("latestUpdate", { time: relativeTime(latest) }) : t("awaitingFirstSync"),
+    })
+    : t("noPublicAccounts");
 }
 
 function renderAccounts(accounts) {
@@ -108,7 +115,11 @@ function renderAccounts(accounts) {
   if (!accounts.length) {
     const empty = document.createElement("div");
     empty.className = "home-empty";
-    empty.innerHTML = "<strong>还没有可阅读的账号</strong><span>管理员添加账号并完成抓取后，会自动显示在这里。</span>";
+    const title = document.createElement("strong");
+    title.textContent = t("noReadableAccounts");
+    const help = document.createElement("span");
+    help.textContent = t("noReadableAccountsHelp");
+    empty.append(title, help);
     grid.append(empty);
     return;
   }
@@ -143,35 +154,35 @@ function createAccountCard(account) {
   if (!account.isPublic) {
     const privacy = document.createElement("span");
     privacy.className = "home-private-badge";
-    privacy.textContent = currentMember ? "会员专属" : "仅管理员可见";
+    privacy.textContent = currentMember ? t("memberOnly") : t("adminOnly");
     body.append(privacy);
   }
   const handle = document.createElement("div");
   handle.className = "home-card-handle";
   handle.textContent = `@${account.username}`;
   const bio = document.createElement("p");
-  bio.textContent = account.bio || "暂无个人简介";
+  bio.textContent = account.bio || t("noBio");
   const meta = document.createElement("div");
   meta.className = "home-card-meta";
-  meta.innerHTML = `<span><strong>${formatCount(account.tweetCount || 0)}</strong> 条内容</span><span><strong>${formatCount(account.mediaCount || 0)}</strong> 个媒体</span>`;
+  meta.innerHTML = `<span><strong>${formatCount(account.tweetCount || 0)}</strong> ${t("contentCount", { count: "" }).trim()}</span><span><strong>${formatCount(account.mediaCount || 0)}</strong> ${t("mediaCount", { count: "" }).trim()}</span>`;
   const updated = document.createElement("div");
   updated.className = "home-card-updated";
   updated.classList.toggle("empty", !account.lastSyncedAt);
-  updated.textContent = account.lastSyncedAt ? `最近更新 ${relativeTime(account.lastSyncedAt)}` : "尚未完成首次更新";
+  updated.textContent = account.lastSyncedAt ? t("latestUpdate", { time: relativeTime(account.lastSyncedAt) }) : t("notUpdated");
   const actions = document.createElement("div");
   actions.className = "home-card-actions";
   const reader = document.createElement("a");
   reader.className = "primary-button button-link";
   reader.href = `/reader?account=${account.id}`;
-  reader.setAttribute("aria-label", `阅读 ${account.displayName} 的本站内容`);
-  reader.innerHTML = '<span class="home-action-wide">阅读本站内容</span><span class="home-action-compact">阅读</span>';
+  reader.setAttribute("aria-label", t("readAccountAria", { name: account.displayName }));
+  reader.innerHTML = `<span class="home-action-wide">${t("readLocal")}</span><span class="home-action-compact">${t("readShort")}</span>`;
   const official = document.createElement("a");
   official.className = "secondary-button button-link";
   official.href = `https://x.com/${encodeURIComponent(account.username)}`;
   official.target = "_blank";
   official.rel = "noopener noreferrer";
-  official.setAttribute("aria-label", `打开 ${account.displayName} 的 X 官方主页`);
-  official.innerHTML = '<span class="home-action-wide">X 官方主页 ↗</span><span class="home-action-compact">X 主页</span>';
+  official.setAttribute("aria-label", t("officialAria", { name: account.displayName }));
+  official.innerHTML = `<span class="home-action-wide">${t("officialProfile")}</span><span class="home-action-compact">${t("officialShort")}</span>`;
   actions.append(reader, official);
   body.append(title, handle, bio, meta, updated, actions);
   article.append(cover, avatar, body);
@@ -180,7 +191,7 @@ function createAccountCard(account) {
 
 function relativeTime(value) {
   const seconds = Math.round((new Date(value).getTime() - Date.now()) / 1000);
-  const formatter = new Intl.RelativeTimeFormat("zh-CN", { numeric: "auto" });
+  const formatter = new Intl.RelativeTimeFormat(i18n.localeTag(), { numeric: "auto" });
   if (Math.abs(seconds) < 60) return formatter.format(seconds, "second");
   const minutes = Math.round(seconds / 60);
   if (Math.abs(minutes) < 60) return formatter.format(minutes, "minute");
@@ -191,13 +202,11 @@ function relativeTime(value) {
 
 function formatCount(value) {
   const number = Number(value || 0);
-  if (number >= 100000000) return `${(number / 100000000).toFixed(1)}亿`;
-  if (number >= 10000) return `${(number / 10000).toFixed(number >= 100000 ? 0 : 1)}万`;
-  return new Intl.NumberFormat("zh-CN").format(number);
+  return new Intl.NumberFormat(i18n.localeTag(), { notation: "compact", maximumFractionDigits: 1 }).format(number);
 }
 
 function formatClock(date) {
-  return new Intl.DateTimeFormat("zh-CN", { hour: "2-digit", minute: "2-digit" }).format(date);
+  return new Intl.DateTimeFormat(i18n.localeTag(), { hour: "2-digit", minute: "2-digit" }).format(date);
 }
 
 function showToast(message, error = false) {
@@ -211,4 +220,5 @@ function showToast(message, error = false) {
 
 setupLayoutToggle();
 loadDirectory();
+window.addEventListener("xglow:localechange", loadDirectory);
 window.setInterval(loadDirectory, 30000);

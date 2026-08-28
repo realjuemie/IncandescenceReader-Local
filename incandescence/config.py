@@ -21,7 +21,7 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "barkEnabled": False,
     "barkServerUrl": "https://api.day.app",
     "barkDeviceKey": "",
-    "barkGroup": "Incandescence",
+    "barkGroup": "XGlow",
     "siteBaseUrl": "",
 }
 
@@ -96,8 +96,8 @@ class ConfigStore:
                 allow_path=True,
             ),
             "barkDeviceKey": normalize_bark_device_key(data.get("barkDeviceKey")),
-            "barkGroup": str(data.get("barkGroup") or "Incandescence").strip()[:64]
-            or "Incandescence",
+            "barkGroup": str(data.get("barkGroup") or "XGlow").strip()[:64]
+            or "XGlow",
             "siteBaseUrl": normalize_http_base_url(
                 data.get("siteBaseUrl"), field_name="站点访问地址", allow_path=False
             ),

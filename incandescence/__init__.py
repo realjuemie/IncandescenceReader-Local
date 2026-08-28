@@ -1,3 +1,3 @@
-"""Incandescence 本地阅读器。"""
+"""X拾光 XGlow 本地阅读器。"""
 
-__version__ = "4.10.9"
+__version__ = "4.11.3"

@@ -1,4 +1,4 @@
-# Incandescence 本地 X 阅读器
+# X拾光 XGlow 本地 X 阅读器
 
 这是一个可在 Windows 本地运行、之后可直接迁移到 NAS 的 X/Twitter 阅读与增量归档工具。公开阅读站与管理员后台相互分离：访客只能浏览本地归档，抓取凭证、代理、账号和更新任务只在管理员后台操作。
 
@@ -227,7 +227,8 @@ public/
   index.html / app.js          # 公开阅读页
   admin.html / admin.js        # 管理员后台
   styles.css
-  favicon.svg                  # 网站图标
+  xglow-icon.png              # 站内品牌图标（透明底，兼容明暗背景）
+  xglow-favicon.png           # 浏览器标签图标
 tests/
 Dockerfile
 compose.yaml

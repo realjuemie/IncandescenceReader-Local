@@ -218,7 +218,7 @@ class MemberAuth:
         else:
             normalized_key = None
         effective_key = current["device_key"] if normalized_key is None else normalized_key
-        normalized_group = str(group or "Incandescence").strip()[:64] or "Incandescence"
+        normalized_group = str(group or "XGlow").strip()[:64] or "XGlow"
         if not isinstance(account_ids, list):
             raise ValueError("通知账号列表格式无效")
         normalized_ids = sorted({int(value) for value in account_ids})
