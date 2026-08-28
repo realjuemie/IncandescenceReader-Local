@@ -16,6 +16,7 @@ const state = {
   accountDrafts: new Map(),
   memberDrafts: new Map(),
   shareAccount: null,
+  shareMinutes: 1440,
 };
 
 async function api(path, options = {}) {
@@ -709,9 +710,25 @@ function ensureShareDialog() {
         <button type="button" class="member-notification-close" aria-label="${t("close")}">×</button>
       </header>
       <p class="member-notification-intro" id="admin-share-intro"></p>
-      <div class="admin-share-duration">
-        <label>${t("validFor")}<input type="number" id="admin-share-value" min="1" max="2160" value="24" required></label>
-        <label>${t("timeUnit")}<select id="admin-share-unit"><option value="60">${t("hours")}</option><option value="1440">${t("days")}</option><option value="1">${t("minutes")}</option></select></label>
+      <div class="admin-share-presets" aria-label="${t("popularDurations")}">
+        <button type="button" data-share-preset="60">${t("durationHours", { count: 1 })}</button>
+        <button type="button" data-share-preset="360">${t("durationHours", { count: 6 })}</button>
+        <button type="button" data-share-preset="1440">${t("durationDays", { count: 1 })}</button>
+        <button type="button" data-share-preset="4320">${t("durationDays", { count: 3 })}</button>
+        <button type="button" data-share-preset="10080">${t("durationDays", { count: 7 })}</button>
+      </div>
+      <div class="admin-share-custom">
+        <span class="admin-share-custom-label">${t("customDuration")}</span>
+        <div class="admin-share-stepper">
+          <button type="button" data-share-step="-1" aria-label="${t("decreaseDuration")}">−</button>
+          <input type="number" id="admin-share-value" min="1" max="90" value="1" inputmode="numeric" aria-label="${t("validFor")}" required>
+          <button type="button" data-share-step="1" aria-label="${t("increaseDuration")}">＋</button>
+        </div>
+        <div class="admin-share-unit-switch" role="group" aria-label="${t("timeUnit")}">
+          <button type="button" data-share-unit="1">${t("minutes")}</button>
+          <button type="button" data-share-unit="60">${t("hours")}</button>
+          <button type="button" data-share-unit="1440">${t("days")}</button>
+        </div>
       </div>
       <label class="admin-share-result" id="admin-share-result" hidden>${t("shareLink")}<input id="admin-share-url" readonly></label>
       <div class="member-notification-result" id="admin-share-status" role="status"></div>
@@ -724,18 +741,72 @@ function ensureShareDialog() {
   dialog.querySelector(".member-notification-close").addEventListener("click", () => dialog.close());
   dialog.querySelector("#admin-share-cancel").addEventListener("click", () => dialog.close());
   dialog.querySelector("#admin-share-form").addEventListener("submit", createTemporaryShare);
-  dialog.querySelector("#admin-share-unit").addEventListener("change", constrainShareDuration);
+  dialog.querySelector(".admin-share-presets").addEventListener("click", (event) => {
+    const preset = event.target.closest("[data-share-preset]");
+    if (preset) setShareDuration(Number(preset.dataset.sharePreset));
+  });
+  dialog.querySelector(".admin-share-unit-switch").addEventListener("click", (event) => {
+    const unit = event.target.closest("[data-share-unit]");
+    if (unit) selectShareUnit(Number(unit.dataset.shareUnit));
+  });
+  dialog.querySelector(".admin-share-stepper").addEventListener("click", (event) => {
+    const step = event.target.closest("[data-share-step]");
+    if (!step) return;
+    const input = dialog.querySelector("#admin-share-value");
+    Number(step.dataset.shareStep) > 0 ? input.stepUp() : input.stepDown();
+    updateShareDurationFromControls();
+  });
+  dialog.querySelector("#admin-share-value").addEventListener("input", updateShareDurationFromControls);
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   return dialog;
 }
 
-function constrainShareDuration() {
+function shareDurationLimits(unit) {
+  return unit === 1 ? [5, 129600] : (unit === 60 ? [1, 2160] : [1, 90]);
+}
+
+function setShareDuration(minutes) {
   const dialog = ensureShareDialog();
+  state.shareMinutes = Math.min(129600, Math.max(5, Math.round(minutes)));
+  const unit = state.shareMinutes % 1440 === 0 ? 1440 : (state.shareMinutes % 60 === 0 ? 60 : 1);
   const input = dialog.querySelector("#admin-share-value");
-  const unit = Number(dialog.querySelector("#admin-share-unit").value);
-  input.min = unit === 1 ? "5" : "1";
-  input.max = unit === 1440 ? "90" : (unit === 60 ? "2160" : "129600");
-  input.value = String(Math.min(Number(input.max), Math.max(Number(input.min), Number(input.value) || Number(input.min))));
+  const [minimum, maximum] = shareDurationLimits(unit);
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.value = String(state.shareMinutes / unit);
+  for (const button of dialog.querySelectorAll("[data-share-unit]")) {
+    button.classList.toggle("active", Number(button.dataset.shareUnit) === unit);
+  }
+  for (const button of dialog.querySelectorAll("[data-share-preset]")) {
+    button.classList.toggle("active", Number(button.dataset.sharePreset) === state.shareMinutes);
+  }
+}
+
+function selectShareUnit(unit) {
+  const dialog = ensureShareDialog();
+  const [minimum, maximum] = shareDurationLimits(unit);
+  const input = dialog.querySelector("#admin-share-value");
+  input.min = String(minimum);
+  input.max = String(maximum);
+  input.value = String(Math.min(maximum, Math.max(minimum, Math.round(state.shareMinutes / unit))));
+  for (const button of dialog.querySelectorAll("[data-share-unit]")) {
+    button.classList.toggle("active", Number(button.dataset.shareUnit) === unit);
+  }
+  updateShareDurationFromControls();
+  input.focus();
+}
+
+function updateShareDurationFromControls() {
+  const dialog = ensureShareDialog();
+  const unit = Number(dialog.querySelector("[data-share-unit].active")?.dataset.shareUnit || 1440);
+  const input = dialog.querySelector("#admin-share-value");
+  const [minimum, maximum] = shareDurationLimits(unit);
+  const value = Math.min(maximum, Math.max(minimum, Number(input.value) || minimum));
+  input.value = String(value);
+  state.shareMinutes = Math.round(value * unit);
+  for (const button of dialog.querySelectorAll("[data-share-preset]")) {
+    button.classList.toggle("active", Number(button.dataset.sharePreset) === state.shareMinutes);
+  }
 }
 
 function openShareDialog(account) {
@@ -745,6 +816,7 @@ function openShareDialog(account) {
   dialog.querySelector("#admin-share-result").hidden = true;
   dialog.querySelector("#admin-share-url").value = "";
   dialog.querySelector("#admin-share-status").textContent = "";
+  setShareDuration(1440);
   dialog.showModal();
   dialog.querySelector("#admin-share-value").focus();
 }
@@ -753,15 +825,13 @@ async function createTemporaryShare(event) {
   event.preventDefault();
   if (!state.shareAccount) return;
   const dialog = ensureShareDialog();
-  const value = Number(dialog.querySelector("#admin-share-value").value);
-  const unit = Number(dialog.querySelector("#admin-share-unit").value);
   const button = dialog.querySelector("#admin-share-create");
   button.disabled = true;
   dialog.querySelector("#admin-share-status").textContent = t("creatingShare");
   try {
     const result = await api(`/api/admin/accounts/${state.shareAccount.id}/shares`, {
       method: "POST",
-      body: { expiresInMinutes: Math.round(value * unit) },
+      body: { expiresInMinutes: state.shareMinutes },
     });
     const url = new URL(result.url, window.location.origin).href;
     const output = dialog.querySelector("#admin-share-url");

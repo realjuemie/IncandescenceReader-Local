@@ -98,12 +98,16 @@ function renderMemberStatus(status) {
 function renderSummary(accounts) {
   const latest = accounts.map((item) => item.lastSyncedAt).filter(Boolean).sort().at(-1);
   const publicCount = accounts.filter((item) => item.isPublic).length;
-  const privateCount = accounts.length - publicCount;
+  const sharedCount = accounts.filter((item) => item.isShared).length;
+  const privateCount = accounts.length - publicCount - sharedCount;
   const privateLabel = currentMember ? t("memberOnly") : t("adminOnly");
+  const accessParts = [];
+  if (publicCount) accessParts.push(t("publicAccountCount", { count: publicCount }));
+  if (sharedCount) accessParts.push(t("temporaryAccountCount", { count: sharedCount }));
+  if (privateCount) accessParts.push(t("privateAccountCount", { count: privateCount, label: privateLabel }));
   $("#home-summary").textContent = accounts.length
-    ? t("publicSummary", {
-      publicCount,
-      privatePart: privateCount ? t("privateSummaryPart", { privateCount, label: privateLabel }) : "",
+    ? t("accountDirectorySummary", {
+      access: accessParts.join(" · "),
       latestPart: latest ? t("latestUpdate", { time: relativeTime(latest) }) : t("awaitingFirstSync"),
     })
     : t("noPublicAccounts");
@@ -154,7 +158,9 @@ function createAccountCard(account) {
   if (!account.isPublic) {
     const privacy = document.createElement("span");
     privacy.className = "home-private-badge";
-    privacy.textContent = currentMember ? t("memberOnly") : t("adminOnly");
+    privacy.textContent = account.isShared
+      ? t("temporaryAccess")
+      : (currentMember ? t("memberOnly") : t("adminOnly"));
     body.append(privacy);
   }
   const handle = document.createElement("div");

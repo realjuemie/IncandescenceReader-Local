@@ -128,7 +128,9 @@ function renderAccounts() {
     if (!account.isPublic) {
       const privacy = document.createElement("span");
       privacy.className = "account-privacy";
-      privacy.textContent = state.member ? t("memberVisible") : t("adminShort");
+      privacy.textContent = account.isShared
+        ? t("temporaryAccessShort")
+        : (state.member ? t("memberVisible") : t("adminShort"));
       heading.append(privacy);
     }
     copy.append(heading, handle);

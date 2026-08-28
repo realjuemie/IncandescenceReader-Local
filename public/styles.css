@@ -457,8 +457,21 @@ body.lightbox-open { overflow: hidden; }
 .account-option-checks .public-option { color: var(--ink); font-weight: 700; }
 .account-row-actions { flex-wrap: wrap; }
 .admin-share-dialog { width: min(520px, calc(100vw - 28px)); }
-.admin-share-duration { display: grid; grid-template-columns: minmax(0, 1fr) minmax(130px, .55fr); gap: 12px; }
-.admin-share-duration label, .admin-share-result { display: grid; gap: 7px; color: var(--muted); font-size: var(--text-caption); font-weight: 700; }
+.admin-share-presets { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 6px; padding: 6px; border: 1px solid var(--line); border-radius: 15px; background: var(--wash); }
+.admin-share-presets button { min-width: 0; min-height: 39px; padding: 0 7px; border: 0; border-radius: 10px; color: var(--muted); background: transparent; font: inherit; font-size: var(--text-caption); font-weight: 750; cursor: pointer; transition: color .16s ease, background .16s ease, box-shadow .16s ease, transform .16s ease; }
+.admin-share-presets button:hover { color: var(--ink); background: #fff; }
+.admin-share-presets button.active { color: #fff; background: var(--ink); box-shadow: 0 7px 18px rgba(15,20,25,.18); transform: translateY(-1px); }
+.admin-share-custom { display: grid; grid-template-columns: auto 132px minmax(0, 1fr); align-items: center; gap: 10px; margin-top: 12px; padding: 11px 12px; border: 1px solid var(--line); border-radius: 15px; background: #fff; }
+.admin-share-custom-label { color: var(--muted); font-size: var(--text-caption); font-weight: 750; }
+.admin-share-stepper { height: 40px; display: grid; grid-template-columns: 36px minmax(42px, 1fr) 36px; overflow: hidden; border: 1px solid var(--line-strong); border-radius: 11px; background: var(--wash); }
+.admin-share-stepper button { padding: 0; border: 0; color: var(--ink); background: transparent; font-size: 18px; cursor: pointer; }
+.admin-share-stepper button:hover { background: var(--blue-soft); }
+.admin-share-stepper input { width: 100%; height: 38px; padding: 0 3px; border: 0; border-right: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: 0; outline: 0; background: #fff; font-size: var(--text-ui); font-weight: 800; text-align: center; appearance: textfield; }
+.admin-share-stepper input::-webkit-inner-spin-button, .admin-share-stepper input::-webkit-outer-spin-button { margin: 0; appearance: none; }
+.admin-share-unit-switch { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 3px; padding: 3px; border-radius: 11px; background: var(--wash); }
+.admin-share-unit-switch button { min-height: 34px; padding: 0 5px; border: 0; border-radius: 8px; color: var(--muted); background: transparent; font: inherit; font-size: var(--text-caption); font-weight: 750; cursor: pointer; }
+.admin-share-unit-switch button.active { color: var(--blue-dark); background: #fff; box-shadow: 0 2px 9px rgba(15,20,25,.09); }
+.admin-share-result { display: grid; gap: 7px; margin-top: 12px; color: var(--muted); font-size: var(--text-caption); font-weight: 700; }
 .admin-share-result input { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 13px; }
 .admin-member-list { display: grid; gap: 10px; }
 .admin-member-card { padding: 15px; border: 1px solid var(--line); border-radius: 13px; background: #fff; }
@@ -591,7 +604,9 @@ body.lightbox-open { overflow: hidden; }
   .account-option-checks, .account-row-actions { width: 100%; grid-column: 1 / -1; justify-content: flex-start; }
   .account-option-checks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
   .account-option-checks label { min-height: 38px; display: flex; align-items: center; justify-content: center; gap: 4px; padding: 6px; border: 1px solid var(--line); border-radius: 9px; background: #fff; text-align: center; white-space: normal; }
-  .admin-share-duration { grid-template-columns: 1fr; }
+  .admin-share-presets { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .admin-share-custom { grid-template-columns: 1fr 1fr; }
+  .admin-share-custom-label { grid-column: 1 / -1; }
   .admin-settings-grid { grid-template-columns: 1fr; }
   .bark-settings-grid { grid-template-columns: 1fr; }
   .proxy-actions { align-items: flex-start; flex-direction: column; }
@@ -602,6 +617,9 @@ body.lightbox-open { overflow: hidden; }
 
 @media (max-width: 600px) {
   input, select, textarea { font-size: 16px !important; }
+  .admin-share-presets { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .admin-share-custom { grid-template-columns: 1fr; }
+  .admin-share-custom-label { grid-column: auto; }
   .primary-button, .secondary-button, .danger-button { min-height: 44px; }
   .member-notification-card { padding: 19px 16px max(18px, env(safe-area-inset-bottom)); }
   .member-notification-card h2 { font-size: 22px; }

@@ -931,6 +931,22 @@ class WebRoutingTests(unittest.TestCase):
                     include_reposts=False,
                     is_public=False,
                 )
+                private_tweet = sample_tweet("990", "private post with media")
+                private_tweet["media"] = [
+                    {
+                        "key": "private-photo",
+                        "type": "photo",
+                        "url": "https://pbs.twimg.com/media/private.jpg",
+                    }
+                ]
+                database.insert_tweets(private["id"], [private_tweet])
+                pending = database.pending_media(private["id"])[0]
+                database.media_downloaded(
+                    pending["id"],
+                    "media/private_account/990/private-photo.jpg",
+                    None,
+                    "image/jpeg",
+                )
                 blocked = httpx.get(
                     f"{base_url}/reader?account={private['id']}", timeout=3
                 )
@@ -958,10 +974,15 @@ class WebRoutingTests(unittest.TestCase):
                     shared_reader = client.get(f"{base_url}{opened.headers['location']}")
                     self.assertEqual(shared_reader.status_code, 200)
                     shared_accounts = client.get(f"{base_url}/api/public/accounts")
-                    self.assertIn(
-                        private["id"],
-                        {item["id"] for item in shared_accounts.json()["items"]},
+                    shared_item = next(
+                        item
+                        for item in shared_accounts.json()["items"]
+                        if item["id"] == private["id"]
                     )
+                    self.assertFalse(shared_item["isPublic"])
+                    self.assertTrue(shared_item["isShared"])
+                    self.assertEqual(shared_item["tweetCount"], 1)
+                    self.assertEqual(shared_item["mediaCount"], 1)
                 expired = httpx.get(f"{base_url}/s/not-a-real-share-token-1234567890", timeout=3)
                 self.assertEqual(expired.status_code, 404)
             finally:

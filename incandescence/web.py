@@ -167,17 +167,26 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if shared_account_id is not None and not any(
                     int(item["id"]) == shared_account_id for item in accounts
                 ):
-                    try:
-                        accounts.append(self.app.database.get_account(shared_account_id))
-                    except KeyError:
-                        pass
+                    shared_account = next(
+                        (
+                            item
+                            for item in self.app.database.list_accounts()
+                            if int(item["id"]) == shared_account_id
+                        ),
+                        None,
+                    )
+                    if shared_account is not None:
+                        accounts.append(shared_account)
+                items = []
+                for account in accounts:
+                    item = self.app.account_public(account, include_admin=is_admin)
+                    item["isShared"] = bool(
+                        shared_account_id == int(account["id"])
+                        and not bool(account.get("is_public", 1))
+                    )
+                    items.append(item)
                 self._json(
-                    {
-                        "items": [
-                            self.app.account_public(a, include_admin=is_admin)
-                            for a in accounts
-                        ]
-                    }
+                    {"items": items}
                 )
                 return
             match = re.fullmatch(r"/api/public/accounts/(\d+)/tweets", path)
