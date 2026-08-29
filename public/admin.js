@@ -3,6 +3,7 @@
 const $ = (selector) => document.querySelector(selector);
 const i18n = window.XGlowI18n;
 const t = (key, variables) => i18n.t(key, variables);
+const accountSearch = window.XGlowAccountSearch;
 const state = {
   setupRequired: false,
   accounts: [],
@@ -14,6 +15,7 @@ const state = {
   inspectTimer: null,
   pollingStarted: false,
   accountDrafts: new Map(),
+  accountSearch: "",
   memberDrafts: new Map(),
   shareAccount: null,
   shareMinutes: 1440,
@@ -60,6 +62,8 @@ function bindEvents() {
   $("#add-account-form").addEventListener("submit", addAccount);
   $("#admin-account-list").addEventListener("click", handleAccountAction);
   $("#admin-account-list").addEventListener("input", rememberAccountDraft);
+  $("#admin-account-search").addEventListener("input", handleAccountSearch);
+  $("#admin-account-search").addEventListener("keydown", handleAccountSearchKeydown);
   $("#sync-failure-list").addEventListener("click", handleAccountAction);
   $("#add-member-form").addEventListener("submit", addMember);
   $("#admin-member-list").addEventListener("click", handleMemberAction);
@@ -72,6 +76,18 @@ function bindEvents() {
   $("#clear-bark-key").addEventListener("click", clearBarkKey);
   $("#sync-all").addEventListener("click", syncAll);
   $("#retry-failed").addEventListener("click", syncFailed);
+}
+
+function handleAccountSearch(event) {
+  state.accountSearch = event.currentTarget.value;
+  renderAccounts();
+}
+
+function handleAccountSearchKeydown(event) {
+  if (event.key !== "Escape" || !event.currentTarget.value) return;
+  event.currentTarget.value = "";
+  state.accountSearch = "";
+  renderAccounts();
 }
 
 function showAuth(setupRequired) {
@@ -368,6 +384,11 @@ async function addAccount(event) {
 
 function renderAccounts() {
   const list = $("#admin-account-list");
+  const accounts = accountSearch.filter(state.accounts, state.accountSearch);
+  const searching = Boolean(accountSearch.normalize(state.accountSearch));
+  $("#admin-account-search-count").textContent = searching
+    ? t("filteredAccountCount", { shown: accounts.length, total: state.accounts.length })
+    : t("accountCount", { count: state.accounts.length });
   list.replaceChildren();
   if (!state.accounts.length) {
     const empty = document.createElement("div");
@@ -376,7 +397,18 @@ function renderAccounts() {
     list.append(empty);
     return;
   }
-  for (const account of state.accounts) {
+  if (!accounts.length) {
+    const empty = document.createElement("div");
+    empty.className = "admin-empty account-search-empty";
+    const title = document.createElement("strong");
+    const help = document.createElement("span");
+    title.textContent = t("noAccountMatches");
+    help.textContent = t("tryAnotherAccountSearch");
+    empty.append(title, help);
+    list.append(empty);
+    return;
+  }
+  for (const account of accounts) {
     const draft = state.accountDrafts.get(account.id);
     const selected = draft || {
       isPublic: account.isPublic,

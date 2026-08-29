@@ -3,8 +3,11 @@
 const $ = (selector) => document.querySelector(selector);
 const i18n = window.XGlowI18n;
 const t = (key, variables) => i18n.t(key, variables);
+const accountSearch = window.XGlowAccountSearch;
 let toastTimer = null;
 let currentMember = null;
+let directoryAccounts = [];
+let homeSearchQuery = "";
 const HOME_LAYOUT_KEY = "incandescence-home-layout";
 const SHOW_PUBLIC_KEY = "incandescence-home-show-public";
 let homeLayout = readSavedLayout();
@@ -34,6 +37,31 @@ function visibleAccounts(accounts) {
   if (!currentMember) return accounts;
   if (showPublicAccounts) return accounts;
   return accounts.filter(isExclusiveAccount);
+}
+
+function renderDirectory() {
+  const available = visibleAccounts(directoryAccounts);
+  const filtered = accountSearch.filter(available, homeSearchQuery);
+  renderPublicToggle(directoryAccounts);
+  renderSummary(available, directoryAccounts);
+  renderAccounts(filtered, available, Boolean(accountSearch.normalize(homeSearchQuery)));
+  $("#home-account-search-count").textContent = accountSearch.normalize(homeSearchQuery)
+    ? t("filteredAccountCount", { shown: filtered.length, total: available.length })
+    : t("accountCount", { count: available.length });
+}
+
+function setupAccountSearch() {
+  const input = $("#home-account-search");
+  input.addEventListener("input", () => {
+    homeSearchQuery = input.value;
+    renderDirectory();
+  });
+  input.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || !input.value) return;
+    input.value = "";
+    homeSearchQuery = "";
+    renderDirectory();
+  });
 }
 
 function setHomeLayout(layout, persist = true) {
@@ -80,10 +108,8 @@ async function loadDirectory() {
       const rightTime = right.lastSyncedAt ? new Date(right.lastSyncedAt).getTime() : 0;
       return rightTime - leftTime || left.username.localeCompare(right.username);
     });
-    const shown = visibleAccounts(accounts);
-    renderPublicToggle(accounts);
-    renderSummary(shown, accounts);
-    renderAccounts(shown, accounts);
+    directoryAccounts = accounts;
+    renderDirectory();
     renderMemberStatus(memberStatus);
     $("#home-refresh-time").textContent = t("refreshedAt", { time: formatClock(new Date()) });
   } catch (error) {
@@ -129,7 +155,7 @@ function renderPublicToggle(allAccounts) {
     button.addEventListener("click", () => {
       showPublicAccounts = !showPublicAccounts;
       try { localStorage.setItem(SHOW_PUBLIC_KEY, showPublicAccounts ? "1" : "0"); } catch (_) { /* storage unavailable */ }
-      loadDirectory();
+      renderDirectory();
     });
   }
 }
@@ -157,7 +183,7 @@ function renderSummary(accounts, allAccounts = accounts) {
     : t("noPublicAccounts");
 }
 
-function renderAccounts(accounts, allAccounts = accounts) {
+function renderAccounts(accounts, allAccounts = accounts, searching = false) {
   const grid = $("#home-account-grid");
   grid.replaceChildren();
   if (!accounts.length) {
@@ -165,7 +191,10 @@ function renderAccounts(accounts, allAccounts = accounts) {
     empty.className = "home-empty";
     const title = document.createElement("strong");
     const help = document.createElement("span");
-    if (currentMember && allAccounts.some((item) => item.isPublic && !item.isExclusive) && !showPublicAccounts) {
+    if (searching) {
+      title.textContent = t("noAccountMatches");
+      help.textContent = t("tryAnotherAccountSearch");
+    } else if (currentMember && allAccounts.some((item) => item.isPublic && !item.isExclusive) && !showPublicAccounts) {
       title.textContent = t("noExclusiveAccounts");
       help.textContent = t("noExclusiveAccountsHelp");
     } else {
@@ -274,6 +303,7 @@ function showToast(message, error = false) {
 }
 
 setupLayoutToggle();
+setupAccountSearch();
 loadDirectory();
-window.addEventListener("xglow:localechange", loadDirectory);
+window.addEventListener("xglow:localechange", renderDirectory);
 window.setInterval(loadDirectory, 30000);
