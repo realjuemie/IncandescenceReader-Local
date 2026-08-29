@@ -4,7 +4,7 @@
 
 > **XGlow is a local-first X/Twitter reader and incremental archive for Windows and NAS.** Content, media, accounts and notification settings stay on your own device.
 
-当前版本：**v4.16.2**
+当前版本：**v4.16.3**
 
 项目不使用付费 X API。它通过你自己的 X 网页登录 Cookie 和开源项目 [twscrape](https://github.com/vladkens/twscrape) 读取公开时间线，把文字、账号资料、图片、视频和 GIF 都保存到本机。网页内可添加并切换多个阅读账号，支持手动更新和定时更新。
 

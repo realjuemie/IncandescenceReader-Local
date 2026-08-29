@@ -1727,12 +1727,15 @@ class TelegramIntegrationTests(unittest.TestCase):
             def __init__(self):
                 self.messages = []
 
-            async def send_message(self, chat_id, text, *, reply_markup=None):
+            async def send_message(
+                self, chat_id, text, *, reply_markup=None, parse_mode=None
+            ):
                 self.messages.append(
                     {
                         "chat_id": str(chat_id),
                         "text": text,
                         "reply_markup": reply_markup,
+                        "parse_mode": parse_mode,
                     }
                 )
 
@@ -1787,6 +1790,11 @@ class TelegramIntegrationTests(unittest.TestCase):
             self.assertTrue(access_notice["sent"])
             self.assertIn("@private_user", client.messages[-1]["text"])
             self.assertNotIn("@public_user", client.messages[-1]["text"])
+            self.assertIn(
+                '<a href="https://x.com/private_user">@private_user</a>',
+                client.messages[-1]["text"],
+            )
+            self.assertEqual(client.messages[-1]["parse_mode"], "HTML")
 
     def test_bot_deploy_configures_webhook_menu_and_commands(self):
         calls = []
@@ -1833,6 +1841,44 @@ class TelegramIntegrationTests(unittest.TestCase):
             "https://x.example.test/reader?account=7",
         )
         self.assertNotIn("url", button)
+
+    def test_telegram_x_username_links_to_x_profile_instead_of_tg_mention(self):
+        payloads = []
+
+        def handle(request: httpx.Request) -> httpx.Response:
+            payloads.append(json.loads(request.content))
+            return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
+
+        with tempfile.TemporaryDirectory() as directory:
+            config = ConfigStore(Path(directory))
+            config.update(
+                {
+                    "telegramBotToken": self.TOKEN,
+                    "telegramEnabled": True,
+                    "siteBaseUrl": "https://x.example.test",
+                }
+            )
+            notifier = TelegramNotifier(
+                config,
+                TelegramBotClient(config, transport=httpx.MockTransport(handle)),
+            )
+            asyncio.run(
+                notifier.notify_account_update(
+                    account_id=7,
+                    profile={"username": "x_author", "display_name": "A < B"},
+                    tweets=[sample_tweet("301", "new <content>")],
+                    inserted=1,
+                    chat_id="123456789",
+                )
+            )
+
+        payload = payloads[0]
+        self.assertEqual(payload["parse_mode"], "HTML")
+        self.assertIn(
+            '<a href="https://x.com/x_author">@x_author</a>', payload["text"]
+        )
+        self.assertIn("A &lt; B", payload["text"])
+        self.assertIn("new &lt;content&gt;", payload["text"])
 
 
 if __name__ == "__main__":

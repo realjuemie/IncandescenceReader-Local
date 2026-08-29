@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import html
 import json
 import secrets
 import time
 from datetime import datetime, timezone
 from typing import Any
 from urllib.parse import parse_qsl
+from urllib.parse import quote
 
 import httpx
 
@@ -23,6 +25,15 @@ class TelegramAuthError(ValueError):
 
 class TelegramDeliveryError(RuntimeError):
     pass
+
+
+def x_profile_html(username: Any) -> str:
+    """Return an HTML link that Telegram cannot mistake for a TG mention."""
+
+    normalized = str(username or "unknown").strip().lstrip("@") or "unknown"
+    label = html.escape(f"@{normalized}")
+    url = f"https://x.com/{quote(normalized, safe='')}"
+    return f'<a href="{url}">{label}</a>'
 
 
 def validate_init_data(
@@ -192,6 +203,7 @@ class TelegramBotClient:
         text: str,
         *,
         reply_markup: dict[str, Any] | None = None,
+        parse_mode: str | None = None,
     ) -> Any:
         payload: dict[str, Any] = {
             "chat_id": str(chat_id),
@@ -200,6 +212,8 @@ class TelegramBotClient:
         }
         if reply_markup:
             payload["reply_markup"] = reply_markup
+        if parse_mode:
+            payload["parse_mode"] = parse_mode
         return await self.call("sendMessage", payload)
 
 
@@ -376,16 +390,18 @@ class TelegramService:
         except KeyError:
             chat_id = telegram_user_id
         account_lines = "\n".join(
-            f"• {item.get('display_name') or item['username']} (@{item['username']})"
+            f"• {html.escape(str(item.get('display_name') or item['username']))} "
+            f"({x_profile_html(item['username'])})"
             for item in accounts
         )
         return await self._deliver_member_notice(
             chat_id,
             f"你获得了新的 X拾光会员专属账号权限：\n{account_lines}\n\n重新打开或刷新 Mini App 即可查看。",
+            parse_mode="HTML",
         )
 
     async def _deliver_member_notice(
-        self, chat_id: str, message: str
+        self, chat_id: str, message: str, *, parse_mode: str | None = None
     ) -> dict[str, Any]:
         if not chat_id:
             return {"sent": False, "skipped": True, "reason": "chat-unavailable"}
@@ -396,6 +412,7 @@ class TelegramService:
                 reply_markup=self._web_app_button(
                     str(self.config.get().get("siteBaseUrl") or ""), "打开 X拾光"
                 ),
+                parse_mode=parse_mode,
             )
         except Exception as error:
             return {"sent": False, "error": str(error)}

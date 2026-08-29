@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import re
 import time
 from typing import Any
@@ -8,7 +9,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import ConfigStore
-from .telegram import TelegramBotClient
+from .telegram import TelegramBotClient, x_profile_html
 
 
 class BarkDeliveryError(RuntimeError):
@@ -228,13 +229,14 @@ class TelegramNotifier:
         ]
         newest = tweets[0] if tweets else {}
         summary = _summary_text(newest.get("text"))
+        username_link = x_profile_html(username)
         lines = [
-            f"@{username} 有 {inserted} 条新内容",
-            f"{display_name}（@{username}）",
+            f"{username_link} 有 {inserted} 条新内容",
+            f"{html.escape(display_name)}（{username_link}）",
             "新增：" + " · ".join(kinds or [f"内容 {inserted}"]),
         ]
         if summary:
-            lines.append("最新：" + summary)
+            lines.append("最新：" + html.escape(summary))
         base_url = str(settings.get("siteBaseUrl") or "").rstrip("/")
         target_url = (
             f"{base_url}/reader?account={account_id}"
@@ -247,6 +249,7 @@ class TelegramNotifier:
             reply_markup=self._link_button(
                 target_url, "查看内容", mini_app=bool(base_url)
             ),
+            parse_mode="HTML",
         )
         return {"sent": True}
 
@@ -265,14 +268,18 @@ class TelegramNotifier:
         for item in sessions[:12]:
             label = str(item.get("label") or "未命名凭证")
             username = str(item.get("verifiedUsername") or "").lstrip("@")
-            identity = f"{label}（@{username}）" if username else label
+            identity = (
+                f"{html.escape(label)}（{x_profile_html(username)}）"
+                if username
+                else html.escape(label)
+            )
             lines.append(
-                f"• {identity}：{_summary_text(item.get('error') or '登录状态已失效')}"
+                f"• {identity}：{html.escape(_summary_text(item.get('error') or '登录状态已失效'))}"
             )
         if len(sessions) > 12:
             lines.append(f"另有 {len(sessions) - 12} 个凭证失效")
         if cause:
-            lines.append("触发原因：" + _summary_text(cause))
+            lines.append("触发原因：" + html.escape(_summary_text(cause)))
         base_url = str(settings.get("siteBaseUrl") or "").rstrip("/")
         await self.client.send_message(
             settings["telegramAdminUserId"],
@@ -282,6 +289,7 @@ class TelegramNotifier:
                 "处理凭证",
                 mini_app=bool(base_url),
             ),
+            parse_mode="HTML",
         )
         return {"sent": True}
 
