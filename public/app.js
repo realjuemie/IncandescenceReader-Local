@@ -110,6 +110,20 @@ function bindEvents() {
   $("#close-sidebar").addEventListener("click", () => toggleSidebar(false));
   $("#sidebar-scrim").addEventListener("click", () => toggleSidebar(false));
   $("#sidebar-scrim").addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
+  $("#miniapp-scroll-top").addEventListener("click", () => {
+    window.scrollTo({ top: 0, behavior: "smooth" });
+  });
+  window.addEventListener("scroll", updateMiniAppScrollTop, { passive: true });
+  updateMiniAppScrollTop();
+}
+
+function updateMiniAppScrollTop() {
+  const button = $("#miniapp-scroll-top");
+  const isMiniApp = Boolean(window.XGlowTelegram?.state?.active);
+  const label = i18n.locale === "en" ? "Back to top" : "回到顶部";
+  button.setAttribute("aria-label", label);
+  button.title = label;
+  button.hidden = !isMiniApp || window.scrollY < 280;
 }
 
 function renderAccounts() {
@@ -139,7 +153,7 @@ function renderAccounts() {
     }
     copy.append(heading, handle);
     button.append(copy);
-    button.addEventListener("click", () => selectAccount(account.id));
+    button.addEventListener("click", () => selectAccount(account.id, { scrollToTop: true }));
     list.append(button);
   }
 }
@@ -180,7 +194,7 @@ function showInvalidAccountState() {
   toggleSidebar(false);
 }
 
-async function selectAccount(accountId) {
+async function selectAccount(accountId, { scrollToTop = false } = {}) {
   state.selectedId = accountId || null;
   if (state.selectedId) {
     localStorage.setItem("reader-account-id", String(state.selectedId));
@@ -198,6 +212,9 @@ async function selectAccount(accountId) {
   if (state.selectedId) {
     await loadAvailableMonths();
     await loadTweets(false);
+  }
+  if (scrollToTop) {
+    window.scrollTo({ top: 0, behavior: "smooth" });
   }
 }
 

@@ -143,6 +143,7 @@ class Database:
                     telegram_last_name TEXT NOT NULL DEFAULT '',
                     telegram_photo_url TEXT NOT NULL DEFAULT '',
                     telegram_notifications_enabled INTEGER NOT NULL DEFAULT 0,
+                    telegram_defaults_initialized INTEGER NOT NULL DEFAULT 0,
                     telegram_bound_at TEXT,
                     telegram_last_seen_at TEXT,
                     last_login_at TEXT,
@@ -221,6 +222,7 @@ class Database:
                 ("telegram_last_name", "TEXT NOT NULL DEFAULT ''"),
                 ("telegram_photo_url", "TEXT NOT NULL DEFAULT ''"),
                 ("telegram_notifications_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("telegram_defaults_initialized", "INTEGER NOT NULL DEFAULT 0"),
                 ("telegram_bound_at", "TEXT"),
                 ("telegram_last_seen_at", "TEXT"),
             ):
@@ -230,6 +232,28 @@ class Database:
                 """CREATE UNIQUE INDEX IF NOT EXISTS idx_members_telegram_user_id
                    ON members(telegram_user_id)
                    WHERE telegram_user_id IS NOT NULL AND telegram_user_id <> ''"""
+            )
+            db.execute(
+                """INSERT OR IGNORE INTO member_notification_accounts(
+                       member_id, account_id, created_at
+                   )
+                   SELECT m.id, a.id, ?
+                   FROM members m
+                   JOIN member_account_access maa ON maa.member_id = m.id
+                   JOIN accounts a ON a.id = maa.account_id
+                   WHERE m.telegram_user_id IS NOT NULL
+                     AND m.telegram_user_id <> ''
+                     AND m.telegram_defaults_initialized = 0
+                     AND a.is_public = 0""",
+                (utc_now(),),
+            )
+            db.execute(
+                """UPDATE members
+                   SET telegram_notifications_enabled = 1,
+                       telegram_defaults_initialized = 1
+                   WHERE telegram_user_id IS NOT NULL
+                     AND telegram_user_id <> ''
+                     AND telegram_defaults_initialized = 0"""
             )
             db.execute("UPDATE accounts SET syncing = 0")
             db.commit()
@@ -1033,6 +1057,7 @@ class Database:
                            telegram_username = '', telegram_first_name = '',
                            telegram_last_name = '', telegram_photo_url = '',
                            telegram_notifications_enabled = 0,
+                           telegram_defaults_initialized = 0,
                            telegram_bound_at = NULL, telegram_last_seen_at = NULL,
                            updated_at = ? WHERE id = ?""",
                     (utc_now(), member_id),
@@ -1043,6 +1068,8 @@ class Database:
             return self.get_member(member_id)
 
         details = user if isinstance(user, dict) else {"id": user}
+        current = self.get_member(member_id)
+        apply_defaults = not bool(current.get("telegram_defaults_initialized"))
         user_id = self._telegram_id(details.get("id"))
         if not isinstance(user, dict):
             try:
@@ -1064,6 +1091,9 @@ class Database:
                     """UPDATE members SET telegram_user_id = ?, telegram_username = ?,
                            telegram_first_name = ?, telegram_last_name = ?,
                            telegram_photo_url = ?, telegram_bound_at = COALESCE(telegram_bound_at, ?),
+                           telegram_notifications_enabled = CASE WHEN ? = 1 THEN 1
+                               ELSE telegram_notifications_enabled END,
+                           telegram_defaults_initialized = 1,
                            telegram_last_seen_at = ?, updated_at = ? WHERE id = ?""",
                     (
                         user_id,
@@ -1072,11 +1102,23 @@ class Database:
                         str(details.get("last_name") or "").strip(),
                         str(details.get("photo_url") or "").strip(),
                         now,
+                        int(apply_defaults),
                         now,
                         now,
                         member_id,
                     ),
                 ).rowcount
+                if apply_defaults:
+                    db.execute(
+                        """INSERT OR IGNORE INTO member_notification_accounts(
+                               member_id, account_id, created_at
+                           )
+                           SELECT ?, a.id, ?
+                           FROM member_account_access maa
+                           JOIN accounts a ON a.id = maa.account_id
+                           WHERE maa.member_id = ? AND a.is_public = 0""",
+                        (member_id, now, member_id),
+                    )
                 db.commit()
             if not changed:
                 raise KeyError("会员不存在")
@@ -1269,6 +1311,14 @@ class Database:
         with self.connection() as db:
             try:
                 db.execute("BEGIN IMMEDIATE")
+                previous_ids = {
+                    int(row["account_id"])
+                    for row in db.execute(
+                        "SELECT account_id FROM member_account_access WHERE member_id = ?",
+                        (member_id,),
+                    ).fetchall()
+                }
+                newly_added_ids = set(unique_ids) - previous_ids
                 changed = db.execute(
                     """UPDATE members SET active = ?,
                            password_salt = COALESCE(?, password_salt),
@@ -1300,6 +1350,15 @@ class Database:
                        )""",
                     (member_id, member_id),
                 )
+                for account_id in sorted(newly_added_ids):
+                    db.execute(
+                        """INSERT OR IGNORE INTO member_notification_accounts(
+                               member_id, account_id, created_at
+                           )
+                           SELECT ?, id, ? FROM accounts
+                           WHERE id = ? AND is_public = 0""",
+                        (member_id, utc_now(), account_id),
+                    )
                 db.commit()
             except Exception:
                 db.rollback()

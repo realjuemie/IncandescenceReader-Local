@@ -4,7 +4,7 @@
 
 > **XGlow is a local-first X/Twitter reader and incremental archive for Windows and NAS.** Content, media, accounts and notification settings stay on your own device.
 
-当前版本：**v4.16.3**
+当前版本：**v4.16.4**
 
 项目不使用付费 X API。它通过你自己的 X 网页登录 Cookie 和开源项目 [twscrape](https://github.com/vladkens/twscrape) 读取公开时间线，把文字、账号资料、图片、视频和 GIF 都保存到本机。网页内可添加并切换多个阅读账号，支持手动更新和定时更新。
 
@@ -28,7 +28,9 @@
 - 可选 Bark 增量通知：包含账号头像、新增数量、内容摘要和阅读链接，并支持后台测试推送
 - 每位会员可单独设置 Bark Device Key 与订阅账号；X 登录凭证失效时可通知管理员
 - Telegram Mini App 自动登录：会员与管理员可绑定 Telegram ID，在 Telegram 内直接打开阅读站或 `/admin`
+- Mini App 手机阅读页固定顶部操作栏，可随时打开账号侧栏，并提供快速回到顶部按钮
 - Telegram 机器人支持同步更新通知、凭证失效提醒，以及管理员 `/grant`、`/revoke` 会员授权命令；后台可一键升级最近使用机器人的用户，升级和新增专属账号权限都会主动通知本人
+- 会员绑定 Telegram 后默认开启专属账号更新通知；公开账号不会自动订阅，管理员以后新增的专属账号会自动加入通知列表
 - 完整 Cookie 自动提取、在线有效性验证和多抓取会话管理
 - HTTP、HTTPS、SOCKS5 代理设置与连接测试
 - 手动更新单个账号、手动更新全部账号；失败日志支持一键只重试尚未恢复的账号

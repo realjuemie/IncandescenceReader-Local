@@ -234,6 +234,7 @@ code { padding: 2px 5px; border-radius: 4px; background: var(--hover); font: var
 .mobile-home-link { display: inline-flex; align-items: center; gap: 8px; }
 .mobile-home-link img { width: 28px; height: 28px; border-radius: 8px; }
 .mobile-header-spacer { width: 40px; height: 40px; }
+.miniapp-scroll-top { display: none; }
 .mobile-only, .sidebar-scrim { display: none; }
 
 /* Full-screen image preview */
@@ -632,6 +633,9 @@ body.lightbox-open { overflow: hidden; }
   .mobile-header { min-height: calc(54px + env(safe-area-inset-top)); display: flex; align-items: center; justify-content: space-between; position: sticky; top: 0; z-index: 12; padding: env(safe-area-inset-top) max(10px, env(safe-area-inset-right)) 0 max(10px, env(safe-area-inset-left)); border-bottom: 1px solid var(--line); background: rgba(255,255,255,.96); backdrop-filter: blur(12px); }
   .timeline-toolbar { top: calc(54px + env(safe-area-inset-top)); }
   .icon-button { width: 44px; height: 44px; }
+  body.telegram-mini-app .main-column { padding-top: calc(54px + max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px))); }
+  body.telegram-mini-app .mobile-header { width: min(100%, 600px); position: fixed; top: 0; left: 50%; z-index: 50; transform: translateX(-50%); padding-top: max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px)); }
+  body.telegram-mini-app .miniapp-scroll-top { width: 38px; height: 38px; display: grid; flex: 0 0 38px; }
 }
 
 @media (max-width: 720px) {

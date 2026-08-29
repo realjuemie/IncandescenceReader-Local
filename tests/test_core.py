@@ -289,6 +289,56 @@ class AdminAuthTests(unittest.TestCase):
 
 
 class MemberAuthTests(unittest.TestCase):
+    def test_telegram_defaults_follow_only_new_private_member_access(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            public = db.create_account("public_user")
+            first_private = db.create_account("first_private")
+            second_private = db.create_account("second_private")
+            for account in (first_private, second_private):
+                db.update_account_options(
+                    account["id"],
+                    include_replies=True,
+                    include_reposts=False,
+                    is_public=False,
+                )
+            auth = MemberAuth(db)
+            member = auth.create_member(
+                "reader_one",
+                "member-password",
+                [public["id"], first_private["id"]],
+            )
+            user = {"id": "123456789", "username": "reader_one"}
+            auth.bind_telegram(member["id"], user)
+
+            defaults = auth.notification_settings(member["id"])
+            self.assertTrue(defaults["telegramEnabled"])
+            self.assertEqual(defaults["accountIds"], [first_private["id"]])
+
+            # A member can still opt out of an existing account. Reopening the
+            # Mini App must not silently restore that manual choice.
+            auth.update_notification_settings(
+                member["id"],
+                enabled=False,
+                server_url="https://api.day.app",
+                device_key=None,
+                clear_device_key=False,
+                group="XGlow",
+                account_ids=[],
+                telegram_enabled=True,
+            )
+            auth.bind_telegram(member["id"], user)
+            self.assertEqual(auth.notification_settings(member["id"])["accountIds"], [])
+
+            auth.update_member(
+                member["id"],
+                active=True,
+                account_ids=[public["id"], first_private["id"], second_private["id"]],
+            )
+            after_grant = auth.notification_settings(member["id"])
+            self.assertTrue(after_grant["telegramEnabled"])
+            self.assertEqual(after_grant["accountIds"], [second_private["id"]])
+
     def test_member_only_receives_assigned_private_accounts(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(Path(directory) / "reader.db")

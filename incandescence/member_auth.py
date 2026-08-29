@@ -293,7 +293,7 @@ class MemberAuth:
             raise ValueError("开启 Bark 推送前请填写 Device Key")
         if telegram_enabled and not current["telegram_bound"]:
             raise ValueError("请先绑定 Telegram，再开启 Telegram 推送")
-        if (enabled or telegram_enabled) and not normalized_ids:
+        if enabled and not normalized_ids:
             raise ValueError("开启推送前请至少选择一个通知账号")
         self.database.update_member_notification_settings(
             member_id,
