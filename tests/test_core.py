@@ -302,6 +302,15 @@ class MemberAuthTests(unittest.TestCase):
             visible = db.list_accounts(member_id=member["id"])
             self.assertEqual({item["id"] for item in visible}, {public["id"], private["id"]})
             self.assertTrue(db.member_can_access(member["id"], private["id"]))
+            flags = {item["id"]: bool(item.get("is_assigned")) for item in visible}
+            self.assertFalse(flags[public["id"]])
+            self.assertTrue(flags[private["id"]])
+            auth.update_member(member["id"], active=True, account_ids=[private["id"], public["id"]])
+            assigned = db.list_accounts(member_id=member["id"])
+            assigned_flags = {item["id"]: bool(item.get("is_assigned")) for item in assigned}
+            self.assertTrue(assigned_flags[public["id"]])
+            self.assertTrue(assigned_flags[private["id"]])
+            self.assertTrue(bool(next(item for item in assigned if item["id"] == public["id"])["is_public"]))
             auth.update_member(
                 member["id"], active=False, account_ids=[private["id"]]
             )
@@ -1132,8 +1141,132 @@ class DatabaseTests(unittest.TestCase):
             self.assertEqual(page["items"][0]["repliedTo"]["id"], "230")
             self.assertEqual(page["items"][0]["repliedTo"]["authorUsername"], "other")
 
+    def test_reply_without_reply_to_id_uses_conversation_original(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("monitored")
+            parent = sample_tweet("240", "conversation original")
+            parent.update(
+                {
+                    "author_username": "other",
+                    "author_name": "Other",
+                    "context_only": True,
+                }
+            )
+            reply = sample_tweet("241", "a reply in the thread")
+            reply.update(
+                {
+                    "is_reply": True,
+                    "conversation_id": "240",
+                    "reply_to_id": "",
+                    "reply_to_username": "other",
+                }
+            )
+            db.insert_tweets(account["id"], [parent, reply])
+            page = db.list_tweets(account["id"], kind="all")
+            self.assertEqual([item["id"] for item in page["items"]], ["241"])
+            self.assertEqual(page["items"][0]["repliedTo"]["id"], "240")
+            self.assertEqual(page["items"][0]["repliedTo"]["authorUsername"], "other")
+
+    def test_same_conversation_replies_collapse_into_one_thread(self):
+        with tempfile.TemporaryDirectory() as directory:
+            db = Database(Path(directory) / "reader.db")
+            account = db.create_account("monitored")
+            original = sample_tweet("240", "original post")
+            original.update({"conversation_id": "240"})
+            other_reply = sample_tweet("241", "@monitored hi")
+            other_reply.update(
+                {
+                    "author_username": "other",
+                    "author_name": "Other",
+                    "is_reply": True,
+                    "conversation_id": "240",
+                    "reply_to_id": "240",
+                    "reply_to_username": "monitored",
+                }
+            )
+            own_reply = sample_tweet("242", "@other thanks")
+            own_reply.update(
+                {
+                    "is_reply": True,
+                    "conversation_id": "240",
+                    "reply_to_id": "241",
+                    "reply_to_username": "other",
+                }
+            )
+            db.insert_tweets(account["id"], [original, other_reply, own_reply])
+            page = db.list_tweets(account["id"], kind="all")
+            self.assertEqual(len(page["items"]), 1)
+            item = page["items"][0]
+            self.assertEqual(item["id"], "242")
+            self.assertEqual([entry["id"] for entry in item["thread"]], ["240", "241", "242"])
+            replies_page = db.list_tweets(account["id"], kind="replies")
+            self.assertEqual(len(replies_page["items"]), 1)
+            self.assertEqual(
+                [entry["id"] for entry in replies_page["items"][0]["thread"]],
+                ["240", "241", "242"],
+            )
+
 
 class WebRoutingTests(unittest.TestCase):
+    def test_member_login_outranks_admin_on_public_accounts(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            database = Database(root / "reader.db")
+            public = database.create_account("public_user")
+            exclusive = database.create_account("exclusive_user")
+            database.update_account_options(
+                exclusive["id"],
+                include_replies=True,
+                include_reposts=False,
+                is_public=False,
+            )
+            member_auth = MemberAuth(database)
+            member = member_auth.create_member(
+                "reader_one", "member-password", [exclusive["id"]]
+            )
+            member_token, _ = member_auth.login("reader_one", "member-password")
+            admin_auth = AdminAuth(root)
+            admin_token = admin_auth.setup("test-admin-password")
+            application = Application(
+                data_dir=root,
+                public_dir=Path(__file__).resolve().parents[1] / "public",
+                database=database,
+                config=ConfigStore(root),
+                admin_auth=admin_auth,
+                member_auth=member_auth,
+                share_auth=ShareAuth(database),
+                notifier=SimpleNamespace(),
+                scraper=SimpleNamespace(),
+                sync_service=SimpleNamespace(),
+                scheduler=SimpleNamespace(),
+                scraper_runtime=SimpleNamespace(),
+            )
+            server = create_server(("127.0.0.1", 0), application)
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            base_url = f"http://127.0.0.1:{server.server_address[1]}"
+            try:
+                cookie = (
+                    f"{admin_auth.COOKIE_NAME}={admin_token}; "
+                    f"{member_auth.COOKIE_NAME}={member_token}"
+                )
+                listed = httpx.get(
+                    f"{base_url}/api/public/accounts",
+                    headers={"Cookie": cookie},
+                    timeout=3,
+                )
+                self.assertEqual(listed.status_code, 200)
+                items = {item["id"]: item for item in listed.json()["items"]}
+                self.assertIn(public["id"], items)
+                self.assertIn(exclusive["id"], items)
+                self.assertTrue(items[exclusive["id"]]["isExclusive"])
+                self.assertFalse(items[public["id"]]["isExclusive"])
+                self.assertTrue(items[public["id"]]["isPublic"])
+            finally:
+                server.shutdown()
+                thread.join(timeout=2)
+
     def test_reader_account_validation_and_html_not_found_pages(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)

@@ -7,7 +7,7 @@
   <title>X拾光 · 账号导航</title>
   <link rel="icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
   <link rel="shortcut icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=4.14.1">
+  <link rel="stylesheet" href="/styles.css?v=4.14.4">
 </head>
 <body class="home-body">
   <header class="home-topbar">
@@ -41,9 +41,12 @@
           <h2>账号导航</h2>
           <span class="home-refresh-time" id="home-refresh-time"></span>
         </div>
-        <div class="home-layout-toggle" role="group" aria-label="账号显示方式">
-          <button type="button" data-home-layout="banner" aria-pressed="true" title="切换为横幅显示">横幅</button>
-          <button type="button" data-home-layout="compact" aria-pressed="false" title="切换为小组件显示">组件</button>
+        <div class="home-directory-tools">
+          <button type="button" class="home-public-toggle" id="home-public-toggle" hidden aria-pressed="false"></button>
+          <div class="home-layout-toggle" role="group" aria-label="账号显示方式">
+            <button type="button" data-home-layout="banner" aria-pressed="true" title="切换为横幅显示">横幅</button>
+            <button type="button" data-home-layout="compact" aria-pressed="false" title="切换为小组件显示">组件</button>
+          </div>
         </div>
       </header>
       <div class="home-account-grid" id="home-account-grid" aria-live="polite"></div>
@@ -55,8 +58,8 @@
   </footer>
 
   <div class="toast" id="toast" role="status"></div>
-  <script src="/i18n.js?v=4.14.0" defer></script>
+  <script src="/i18n.js?v=4.14.4" defer></script>
   <script src="/member-notifications.js?v=4.14.0" defer></script>
-  <script src="/home.js?v=4.14.0" defer></script>
+  <script src="/home.js?v=4.14.4" defer></script>
 </body>
 </html>

@@ -266,7 +266,25 @@ class Database:
                 """,
                 query_params,
             ).fetchall()
-        return [dict(row) for row in rows]
+        items = [dict(row) for row in rows]
+        assigned: set[int] = set()
+        if member_id is not None:
+            assigned = self.member_assigned_account_ids(member_id)
+        for item in items:
+            item["is_assigned"] = int(item["id"]) in assigned
+        return items
+
+    def member_assigned_account_ids(self, member_id: int) -> set[int]:
+        """Account IDs explicitly granted to the member (not merely public)."""
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT maa.account_id
+                   FROM member_account_access maa
+                   JOIN members m ON m.id = maa.member_id
+                   WHERE maa.member_id = ? AND m.active = 1""",
+                (member_id,),
+            ).fetchall()
+        return {int(row["account_id"]) for row in rows}
 
     def update_account_options(
         self,
@@ -618,14 +636,20 @@ class Database:
             ).fetchall()
             page = rows[:limit]
             tweet_rows = {str(row["id"]): row for row in page}
-            missing_parent_ids = sorted(
-                {
-                    str(row["reply_to_id"])
-                    for row in page
-                    if row["reply_to_id"]
-                    and str(row["reply_to_id"]) not in tweet_rows
-                }
-            )
+            missing_parent_ids = set()
+            for row in page:
+                reply_to = str(row["reply_to_id"] or "")
+                conversation = str(row["conversation_id"] or "")
+                if reply_to and reply_to not in tweet_rows:
+                    missing_parent_ids.add(reply_to)
+                if (
+                    bool(row["is_reply"])
+                    and conversation
+                    and conversation != str(row["id"])
+                    and conversation not in tweet_rows
+                ):
+                    missing_parent_ids.add(conversation)
+            missing_parent_ids = sorted(missing_parent_ids)
             if missing_parent_ids:
                 parent_placeholders = ",".join("?" for _ in missing_parent_ids)
                 parent_rows = db.execute(
@@ -657,9 +681,14 @@ class Database:
             item = self._tweet_public(dict(row), media_map[str(row["id"])])
             parent_id = str(row["reply_to_id"] or "")
             parent = tweet_rows.get(parent_id)
+            if parent is None and bool(row["is_reply"]):
+                conversation = str(row["conversation_id"] or "")
+                if conversation and conversation != str(row["id"]):
+                    parent_id = conversation
+                    parent = tweet_rows.get(parent_id)
             replied_to = (
-                self._tweet_public(dict(parent), media_map[parent_id])
-                if parent is not None and parent_id != str(row["id"])
+                self._tweet_public(dict(parent), media_map.get(parent_id, []))
+                if parent is not None and str(parent["id"]) != str(row["id"])
                 else None
             )
             if kind == "media" and replied_to is not None:
@@ -667,13 +696,108 @@ class Database:
                 replied_to["media"] = []
             item["repliedTo"] = replied_to
             items.append(item)
+        if kind in ("all", "replies"):
+            items = self._collapse_reply_threads(account_id, items)
         next_cursor = None
         if len(rows) > limit and page:
             last = page[-1]
             next_cursor = self._encode_cursor(last["created_at"], last["id"])
         return {"items": items, "nextCursor": next_cursor}
 
+    def _collapse_reply_threads(
+        self, account_id: int, items: list[dict[str, Any]]
+    ) -> list[dict[str, Any]]:
+        if len(items) < 2:
+            return items
+        conv_ids: list[str] = []
+        seen: set[str] = set()
+        for item in items:
+            cid = str(item.get("conversationId") or item["id"])
+            if cid not in seen:
+                seen.add(cid)
+                conv_ids.append(cid)
+        placeholders = ",".join("?" for _ in conv_ids)
+        with self.connection() as db:
+            newest_rows = db.execute(
+                f"""SELECT COALESCE(NULLIF(conversation_id, ''), id) AS cid, id
+                    FROM tweets
+                    WHERE account_id = ? AND context_only = 0
+                      AND COALESCE(NULLIF(conversation_id, ''), id) IN ({placeholders})
+                    ORDER BY created_at DESC, id DESC""",
+                [account_id, *conv_ids],
+            ).fetchall()
+            thread_rows = db.execute(
+                f"""SELECT t.*,
+                           CASE
+                             WHEN t.author_avatar_path IS NOT NULL THEN t.author_avatar_path
+                             WHEN lower(t.author_username) = lower(a.username) THEN a.avatar_path
+                             ELSE NULL
+                           END AS resolved_author_avatar_path
+                    FROM tweets t
+                    JOIN accounts a ON a.id = t.account_id
+                    WHERE t.account_id = ?
+                      AND COALESCE(NULLIF(t.conversation_id, ''), t.id) IN ({placeholders})
+                    ORDER BY t.created_at ASC, t.id ASC""",
+                [account_id, *conv_ids],
+            ).fetchall()
+            media_ids = [str(row["id"]) for row in thread_rows]
+            media_map: dict[str, list[dict[str, Any]]] = {tweet_id: [] for tweet_id in media_ids}
+            if media_ids:
+                media_placeholders = ",".join("?" for _ in media_ids)
+                for media in db.execute(
+                    f"SELECT * FROM media WHERE tweet_id IN ({media_placeholders}) ORDER BY id",
+                    media_ids,
+                ).fetchall():
+                    media_map[str(media["tweet_id"])].append(self._media_public(dict(media)))
+
+        newest_by_conv: dict[str, str] = {}
+        for row in newest_rows:
+            cid = str(row["cid"])
+            if cid not in newest_by_conv:
+                newest_by_conv[cid] = str(row["id"])
+
+        public_by_id: dict[str, dict[str, Any]] = {}
+        tweets_by_conv: dict[str, list[dict[str, Any]]] = {}
+        for row in thread_rows:
+            public = self._tweet_public(dict(row), media_map.get(str(row["id"]), []))
+            public_by_id[str(row["id"])] = public
+            cid = str(row["conversation_id"] or row["id"])
+            tweets_by_conv.setdefault(cid, []).append(public)
+
+        page_ids = {str(item["id"]) for item in items}
+        emitted: set[str] = set()
+        collapsed: list[dict[str, Any]] = []
+        for item in items:
+            cid = str(item.get("conversationId") or item["id"])
+            if cid in emitted:
+                continue
+            newest_id = newest_by_conv.get(cid)
+            if newest_id and newest_id not in page_ids:
+                continue
+            thread = tweets_by_conv.get(cid) or [item]
+            unique: list[dict[str, Any]] = []
+            seen_ids: set[str] = set()
+            for entry in thread:
+                if entry["id"] in seen_ids:
+                    continue
+                seen_ids.add(entry["id"])
+                unique.append(entry)
+            unique.sort(key=lambda entry: (entry.get("createdAt") or "", entry["id"]))
+            lead = dict(public_by_id.get(newest_id, item) if newest_id else item)
+            if len(unique) > 1:
+                lead["thread"] = unique
+                root = next(
+                    (entry for entry in unique if entry["id"] == cid or not entry.get("isReply")),
+                    unique[0],
+                )
+                if lead["id"] != root["id"]:
+                    lead["repliedTo"] = root
+            collapsed.append(lead)
+            emitted.add(cid)
+        return collapsed
+
     def list_tweet_months(self, account_id: int) -> list[dict[str, int]]:
+
         self.get_account(account_id)
         with self.connection() as db:
             rows = db.execute(
@@ -1072,6 +1196,7 @@ class Database:
 
         return {
             "id": tweet["id"],
+            "conversationId": tweet.get("conversation_id") or tweet["id"],
             "authorUsername": tweet["author_username"],
             "authorName": tweet["author_name"],
             "authorAvatarUrl": _file_url(tweet.get("resolved_author_avatar_path")),

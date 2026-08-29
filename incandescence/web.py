@@ -157,8 +157,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 return
             if path == "/api/public/accounts":
-                is_admin = self._admin_authenticated()
-                member = None if is_admin else self._member()
+                member = self._member()
+                is_admin = self._admin_authenticated() and member is None
                 accounts = self.app.database.list_accounts(
                     public_only=not is_admin and member is None,
                     member_id=int(member["id"]) if member else None,
@@ -180,8 +180,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 items = []
                 for account in accounts:
                     item = self.app.account_public(account, include_admin=is_admin)
+                    item["isExclusive"] = bool(account.get("is_assigned"))
                     item["isShared"] = bool(
                         shared_account_id == int(account["id"])
+                        and not item["isExclusive"]
                         and not bool(account.get("is_public", 1))
                     )
                     items.append(item)

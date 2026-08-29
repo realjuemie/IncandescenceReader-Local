@@ -75,22 +75,24 @@ function bindEvents() {
       loadTweets(false);
     }, 280);
   });
-  $("#filter-year").addEventListener("change", (event) => {
-    state.year = event.target.value;
-    state.month = "";
-    renderDateFilters();
-    loadTweets(false);
+  $("#filter-year-btn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    toggleDateMenu("year");
   });
-  $("#filter-month").addEventListener("change", (event) => {
-    state.month = event.target.value;
-    renderDateFilters();
-    loadTweets(false);
+  $("#filter-month-btn").addEventListener("click", (event) => {
+    event.stopPropagation();
+    if ($("#filter-month-btn").disabled) return;
+    toggleDateMenu("month");
   });
   $("#reset-date-filter").addEventListener("click", () => {
     state.year = "";
     state.month = "";
+    closeDateMenus();
     renderDateFilters();
     loadTweets(false);
+  });
+  document.addEventListener("click", (event) => {
+    if (!event.target.closest("#date-filter")) closeDateMenus();
   });
   $("#timeline").addEventListener("click", (event) => {
     const trigger = event.target.closest("[data-lightbox-url]");
@@ -106,6 +108,7 @@ function bindEvents() {
   $("#open-sidebar").addEventListener("click", () => toggleSidebar(true));
   $("#close-sidebar").addEventListener("click", () => toggleSidebar(false));
   $("#sidebar-scrim").addEventListener("click", () => toggleSidebar(false));
+  $("#sidebar-scrim").addEventListener("touchmove", (event) => event.preventDefault(), { passive: false });
 }
 
 function renderAccounts() {
@@ -209,34 +212,104 @@ async function loadAvailableMonths() {
   }
 }
 
+function allYearsLabel() {
+  return i18n.locale === "en" ? "All years" : "全部年份";
+}
+
+function allMonthsLabel() {
+  return i18n.locale === "en" ? "All months" : "全部月份";
+}
+
+function closeDateMenus() {
+  $("#filter-year-menu").hidden = true;
+  $("#filter-month-menu").hidden = true;
+  $("#filter-year-btn").setAttribute("aria-expanded", "false");
+  $("#filter-month-btn").setAttribute("aria-expanded", "false");
+  $("#date-filter").classList.remove("open");
+}
+
+function toggleDateMenu(which) {
+  const yearOpen = which === "year" && $("#filter-year-menu").hidden;
+  const monthOpen = which === "month" && $("#filter-month-menu").hidden;
+  closeDateMenus();
+  if (yearOpen) {
+    $("#filter-year-menu").hidden = false;
+    $("#filter-year-btn").setAttribute("aria-expanded", "true");
+    $("#date-filter").classList.add("open");
+  } else if (monthOpen) {
+    $("#filter-month-menu").hidden = false;
+    $("#filter-month-btn").setAttribute("aria-expanded", "true");
+    $("#date-filter").classList.add("open");
+  }
+}
+
+function fillDateMenu(menu, items, selected, onPick) {
+  menu.replaceChildren();
+  for (const item of items) {
+    const option = document.createElement("button");
+    option.type = "button";
+    option.className = "date-filter-option";
+    option.role = "option";
+    option.setAttribute("aria-selected", String(item.value === selected));
+    option.textContent = item.label;
+    option.addEventListener("click", (event) => {
+      event.stopPropagation();
+      onPick(item.value);
+    });
+    menu.append(option);
+  }
+}
+
 function renderDateFilters() {
-  const yearSelect = $("#filter-year");
-  const monthSelect = $("#filter-month");
   const years = [...new Set(state.availableMonths.map((item) => String(item.year)))];
   if (state.year && !years.includes(state.year)) {
     state.year = "";
     state.month = "";
   }
-  yearSelect.replaceChildren(new Option(i18n.locale === "en" ? "All years" : "全部年份", ""));
+  const yearItems = [{ value: "", label: allYearsLabel() }];
   for (const year of years) {
     const count = state.availableMonths
       .filter((item) => String(item.year) === year)
       .reduce((total, item) => total + Number(item.count || 0), 0);
-    yearSelect.add(new Option(t("yearOption", { year, count: formatCount(count) }), year));
+    yearItems.push({ value: year, label: t("yearOption", { year, count: formatCount(count) }) });
   }
-  yearSelect.value = state.year;
+  fillDateMenu($("#filter-year-menu"), yearItems, state.year, (value) => {
+    state.year = value;
+    state.month = "";
+    closeDateMenus();
+    renderDateFilters();
+    loadTweets(false);
+  });
+  $("#filter-year-btn").textContent = state.year
+    ? t("yearOption", { year: state.year, count: formatCount(yearItems.slice(1).filter((item) => item.value === state.year).reduce((sum, item) => {
+      const match = state.availableMonths.filter((row) => String(row.year) === state.year);
+      return match.reduce((total, row) => total + Number(row.count || 0), 0);
+    }, 0)) }).replace(/ · .+$/, "") || state.year
+    : allYearsLabel();
+  if (state.year) $("#filter-year-btn").textContent = `${state.year}${i18n.locale === "en" ? "" : "年"}`;
 
   const available = state.year
     ? state.availableMonths.filter((item) => String(item.year) === state.year)
     : [];
   const validMonths = available.map((item) => String(item.month));
   if (state.month && !validMonths.includes(state.month)) state.month = "";
-  monthSelect.replaceChildren(new Option(i18n.locale === "en" ? "All months" : "全部月份", ""));
+  const monthItems = [{ value: "", label: allMonthsLabel() }];
   for (const item of available) {
-    monthSelect.add(new Option(t("monthOption", { month: item.month, count: formatCount(item.count) }), String(item.month)));
+    monthItems.push({
+      value: String(item.month),
+      label: t("monthOption", { month: item.month, count: formatCount(item.count) }),
+    });
   }
-  monthSelect.value = state.month;
-  monthSelect.disabled = !state.year;
+  fillDateMenu($("#filter-month-menu"), monthItems, state.month, (value) => {
+    state.month = value;
+    closeDateMenus();
+    renderDateFilters();
+    loadTweets(false);
+  });
+  $("#filter-month-btn").disabled = !state.year;
+  $("#filter-month-btn").textContent = state.month
+    ? `${state.month}${i18n.locale === "en" ? "" : "月"}`
+    : allMonthsLabel();
   $("#reset-date-filter").hidden = !state.year;
 }
 
@@ -314,7 +387,7 @@ async function loadTweets(append) {
     const page = await api(`/api/public/accounts/${state.selectedId}/tweets?${params}`);
     for (const tweet of page.items) {
       $("#timeline").append(renderTweet(tweet, {
-        showReplyParent: state.kind !== "all",
+        showReplyParent: true,
       }));
     }
     state.cursor = page.nextCursor;
@@ -337,8 +410,29 @@ async function loadTweets(append) {
 
 function renderTweet(tweet, { showReplyParent = true } = {}) {
   const article = document.createElement("article");
-  article.className = tweet.isReply ? "tweet-card reply-tweet-card" : "tweet-card";
+  const thread = Array.isArray(tweet.thread) ? tweet.thread.filter(Boolean) : [];
   article.dataset.tweetId = String(tweet.id);
+  if (thread.length > 1) {
+    article.className = "tweet-card reply-tweet-card";
+    const frame = document.createElement("div");
+    frame.className = "reply-frame";
+    thread.forEach((entry, index) => {
+      const isFirst = index === 0;
+      const isLast = index === thread.length - 1;
+      const parts = renderTweetEntry(entry, { stripReplyTarget: !isFirst && entry.isReply });
+      if (!isFirst && entry.isReply) parts.main.prepend(renderReplyContext(entry));
+      const node = document.createElement("div");
+      node.className = "reply-thread-entry";
+      if (isFirst) node.classList.add("reply-parent-entry");
+      else if (isLast) node.classList.add("reply-current-entry");
+      else node.classList.add("reply-middle-entry");
+      node.append(parts.avatar, parts.main);
+      frame.append(node);
+    });
+    article.append(frame);
+    return article;
+  }
+  article.className = tweet.isReply ? "tweet-card reply-tweet-card" : "tweet-card";
   if (!tweet.isReply) {
     const parts = renderTweetEntry(tweet);
     article.append(parts.avatar, parts.main);
@@ -651,9 +745,27 @@ async function refreshPublicContent() {
   } catch (_) { /* polling failures do not interrupt reading */ }
 }
 
+let sidebarScrollY = 0;
+
 function toggleSidebar(open) {
   $("#sidebar").classList.toggle("open", open);
   $("#sidebar-scrim").classList.toggle("show", open);
+  document.body.classList.toggle("sidebar-open", open);
+  if (open) {
+    sidebarScrollY = window.scrollY;
+    document.body.style.position = "fixed";
+    document.body.style.top = `-${sidebarScrollY}px`;
+    document.body.style.left = "0";
+    document.body.style.right = "0";
+    document.body.style.width = "100%";
+  } else {
+    document.body.style.position = "";
+    document.body.style.top = "";
+    document.body.style.left = "";
+    document.body.style.right = "";
+    document.body.style.width = "";
+    window.scrollTo(0, sidebarScrollY);
+  }
 }
 
 function formatDate(value) {

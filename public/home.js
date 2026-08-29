@@ -6,7 +6,9 @@ const t = (key, variables) => i18n.t(key, variables);
 let toastTimer = null;
 let currentMember = null;
 const HOME_LAYOUT_KEY = "incandescence-home-layout";
+const SHOW_PUBLIC_KEY = "incandescence-home-show-public";
 let homeLayout = readSavedLayout();
+let showPublicAccounts = readShowPublic();
 
 function readSavedLayout() {
   try {
@@ -14,6 +16,24 @@ function readSavedLayout() {
   } catch (_) {
     return "banner";
   }
+}
+
+function readShowPublic() {
+  try {
+    return localStorage.getItem(SHOW_PUBLIC_KEY) === "1";
+  } catch (_) {
+    return false;
+  }
+}
+
+function isExclusiveAccount(account) {
+  return Boolean(account.isExclusive || account.isShared);
+}
+
+function visibleAccounts(accounts) {
+  if (!currentMember) return accounts;
+  if (showPublicAccounts) return accounts;
+  return accounts.filter(isExclusiveAccount);
 }
 
 function setHomeLayout(layout, persist = true) {
@@ -60,8 +80,10 @@ async function loadDirectory() {
       const rightTime = right.lastSyncedAt ? new Date(right.lastSyncedAt).getTime() : 0;
       return rightTime - leftTime || left.username.localeCompare(right.username);
     });
-    renderSummary(accounts);
-    renderAccounts(accounts);
+    const shown = visibleAccounts(accounts);
+    renderPublicToggle(accounts);
+    renderSummary(shown, accounts);
+    renderAccounts(shown, accounts);
     renderMemberStatus(memberStatus);
     $("#home-refresh-time").textContent = t("refreshedAt", { time: formatClock(new Date()) });
   } catch (error) {
@@ -95,16 +117,38 @@ function renderMemberStatus(status) {
   }
 }
 
-function renderSummary(accounts) {
+function renderPublicToggle(allAccounts) {
+  const button = $("#home-public-toggle");
+  const show = Boolean(currentMember);
+  button.hidden = !show;
+  if (!show) return;
+  button.textContent = showPublicAccounts ? t("hidePublicAccounts") : t("showPublicAccounts");
+  button.setAttribute("aria-pressed", String(showPublicAccounts));
+  if (!button.dataset.bound) {
+    button.dataset.bound = "1";
+    button.addEventListener("click", () => {
+      showPublicAccounts = !showPublicAccounts;
+      try { localStorage.setItem(SHOW_PUBLIC_KEY, showPublicAccounts ? "1" : "0"); } catch (_) { /* storage unavailable */ }
+      loadDirectory();
+    });
+  }
+}
+
+function renderSummary(accounts, allAccounts = accounts) {
   const latest = accounts.map((item) => item.lastSyncedAt).filter(Boolean).sort().at(-1);
-  const publicCount = accounts.filter((item) => item.isPublic).length;
+  const exclusiveCount = accounts.filter(isExclusiveAccount).length;
+  const publicCount = accounts.filter((item) => item.isPublic && !item.isExclusive).length;
   const sharedCount = accounts.filter((item) => item.isShared).length;
-  const privateCount = accounts.length - publicCount - sharedCount;
+  const privateCount = exclusiveCount;
   const privateLabel = currentMember ? t("memberOnly") : t("adminOnly");
   const accessParts = [];
   if (publicCount) accessParts.push(t("publicAccountCount", { count: publicCount }));
   if (sharedCount) accessParts.push(t("temporaryAccountCount", { count: sharedCount }));
   if (privateCount) accessParts.push(t("privateAccountCount", { count: privateCount, label: privateLabel }));
+  if (!accounts.length && currentMember && allAccounts.some((item) => item.isPublic && !item.isExclusive) && !showPublicAccounts) {
+    $("#home-summary").textContent = t("noExclusiveAccounts");
+    return;
+  }
   $("#home-summary").textContent = accounts.length
     ? t("accountDirectorySummary", {
       access: accessParts.join(" · "),
@@ -113,16 +157,21 @@ function renderSummary(accounts) {
     : t("noPublicAccounts");
 }
 
-function renderAccounts(accounts) {
+function renderAccounts(accounts, allAccounts = accounts) {
   const grid = $("#home-account-grid");
   grid.replaceChildren();
   if (!accounts.length) {
     const empty = document.createElement("div");
     empty.className = "home-empty";
     const title = document.createElement("strong");
-    title.textContent = t("noReadableAccounts");
     const help = document.createElement("span");
-    help.textContent = t("noReadableAccountsHelp");
+    if (currentMember && allAccounts.some((item) => item.isPublic && !item.isExclusive) && !showPublicAccounts) {
+      title.textContent = t("noExclusiveAccounts");
+      help.textContent = t("noExclusiveAccountsHelp");
+    } else {
+      title.textContent = t("noReadableAccounts");
+      help.textContent = t("noReadableAccountsHelp");
+    }
     empty.append(title, help);
     grid.append(empty);
     return;
@@ -155,12 +204,12 @@ function createAccountCard(account) {
   body.className = "home-card-body";
   const title = document.createElement("h3");
   title.textContent = account.displayName;
-  if (!account.isPublic) {
+  if (account.isExclusive || account.isShared || !account.isPublic) {
     const privacy = document.createElement("span");
     privacy.className = "home-private-badge";
     privacy.textContent = account.isShared
       ? t("temporaryAccess")
-      : (currentMember ? t("memberOnly") : t("adminOnly"));
+      : (account.isExclusive || currentMember ? t("memberOnly") : t("adminOnly"));
     body.append(privacy);
   }
   const handle = document.createElement("div");
