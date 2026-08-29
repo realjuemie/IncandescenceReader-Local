@@ -23,6 +23,7 @@ function safeRedirect() {
 }
 
 async function initialize() {
+  await window.XGlowTelegram?.ready;
   $("#member-login-form").addEventListener("submit", login);
   $("#member-logout").addEventListener("click", logout);
   $("#member-continue").href = safeRedirect();

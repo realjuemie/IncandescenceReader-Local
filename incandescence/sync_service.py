@@ -9,7 +9,7 @@ from .async_runtime import AsyncRuntime
 from .config import ConfigStore
 from .database import Database
 from .media import MediaStore
-from .notifications import BarkNotifier
+from .notifications import BarkNotifier, TelegramNotifier
 from .scraper import FreeXScraper, is_rate_limit_message
 
 
@@ -26,6 +26,7 @@ class SyncService:
         media: MediaStore,
         scraper_runtime: AsyncRuntime | None = None,
         notifier: BarkNotifier | None = None,
+        telegram_notifier: TelegramNotifier | None = None,
     ):
         self.database = database
         self.config = config
@@ -33,6 +34,7 @@ class SyncService:
         self.media = media
         self.scraper_runtime = scraper_runtime
         self.notifier = notifier
+        self.telegram_notifier = telegram_notifier
         self._lock = threading.Lock()
         self._current_account_id: int | None = None
         self.account_sync_gap_seconds = 3
@@ -104,52 +106,100 @@ class SyncService:
                 "mediaDownloaded": media_result["downloaded"],
                 "mediaFailed": media_result["failed"],
             }
-            if self.notifier and inserted > 0 and account.get("last_tweet_id"):
-                try:
-                    notification = await self.notifier.notify_account_update(
-                        account_id=account_id,
-                        profile=result["profile"],
-                        tweets=result["tweets"],
-                        inserted=inserted,
-                    )
-                    if notification:
-                        response["notification"] = notification
-                except Exception as notification_error:
-                    response["notification"] = {
-                        "sent": False,
-                        "error": str(notification_error),
-                    }
-                member_notifications: list[dict[str, Any]] = []
-                site_base_url = str(settings.get("siteBaseUrl") or "")
-                for target in self.database.list_member_notification_targets(account_id):
+            if inserted > 0 and account.get("last_tweet_id"):
+                if self.notifier:
                     try:
-                        delivered = await self.notifier.notify_account_update(
+                        notification = await self.notifier.notify_account_update(
                             account_id=account_id,
                             profile=result["profile"],
                             tweets=result["tweets"],
                             inserted=inserted,
-                            settings={
-                                "barkEnabled": True,
-                                "barkServerUrl": target["bark_server_url"],
-                                "barkDeviceKey": target["bark_device_key"],
-                                "barkGroup": target["bark_group"],
-                                "siteBaseUrl": site_base_url,
-                            },
                         )
-                        member_notifications.append(
-                            {
-                                "memberId": int(target["member_id"]),
-                                "sent": bool(delivered),
-                            }
+                        if notification:
+                            response["notification"] = notification
+                    except Exception as notification_error:
+                        response["notification"] = {
+                            "sent": False,
+                            "error": str(notification_error),
+                        }
+                if self.telegram_notifier:
+                    try:
+                        notification = await self.telegram_notifier.notify_account_update(
+                            account_id=account_id,
+                            profile=result["profile"],
+                            tweets=result["tweets"],
+                            inserted=inserted,
+                            admin=True,
                         )
-                    except Exception as member_notification_error:
-                        member_notifications.append(
-                            {
-                                "memberId": int(target["member_id"]),
-                                "sent": False,
-                                "error": str(member_notification_error),
-                            }
-                        )
+                        if notification:
+                            response["telegramNotification"] = notification
+                    except Exception as notification_error:
+                        response["telegramNotification"] = {
+                            "sent": False,
+                            "error": str(notification_error),
+                        }
+                member_notifications: list[dict[str, Any]] = []
+                if self.notifier:
+                    site_base_url = str(settings.get("siteBaseUrl") or "")
+                    for target in self.database.list_member_notification_targets(account_id):
+                        try:
+                            delivered = await self.notifier.notify_account_update(
+                                account_id=account_id,
+                                profile=result["profile"],
+                                tweets=result["tweets"],
+                                inserted=inserted,
+                                settings={
+                                    "barkEnabled": True,
+                                    "barkServerUrl": target["bark_server_url"],
+                                    "barkDeviceKey": target["bark_device_key"],
+                                    "barkGroup": target["bark_group"],
+                                    "siteBaseUrl": site_base_url,
+                                },
+                            )
+                            member_notifications.append(
+                                {
+                                    "channel": "bark",
+                                    "memberId": int(target["member_id"]),
+                                    "sent": bool(delivered),
+                                }
+                            )
+                        except Exception as member_notification_error:
+                            member_notifications.append(
+                                {
+                                    "channel": "bark",
+                                    "memberId": int(target["member_id"]),
+                                    "sent": False,
+                                    "error": str(member_notification_error),
+                                }
+                            )
+                if self.telegram_notifier:
+                    for target in self.database.list_member_telegram_notification_targets(
+                        account_id
+                    ):
+                        try:
+                            delivered = await self.telegram_notifier.notify_account_update(
+                                account_id=account_id,
+                                profile=result["profile"],
+                                tweets=result["tweets"],
+                                inserted=inserted,
+                                chat_id=target["telegram_user_id"],
+                            )
+                            member_notifications.append(
+                                {
+                                    "channel": "telegram",
+                                    "memberId": int(target["member_id"]),
+                                    "sent": bool(delivered),
+                                }
+                            )
+                        except Exception as member_notification_error:
+                            member_notifications.append(
+                                {
+                                    "channel": "telegram",
+                                    "memberId": int(target["member_id"]),
+                                    "sent": False,
+                                    "error": str(member_notification_error),
+                                }
+                            )
                 if member_notifications:
                     response["memberNotifications"] = {
                         "sent": sum(1 for item in member_notifications if item["sent"]),
@@ -171,9 +221,9 @@ class SyncService:
     async def notify_invalid_credentials(
         self, *, cause: str | None = None
     ) -> dict[str, Any] | None:
-        """Send one Bark alert per invalidation cycle without breaking sync."""
+        """Send one alert per invalidation cycle without breaking sync."""
 
-        if not self.notifier:
+        if not self.notifier and not self.telegram_notifier:
             return None
         try:
             pending = self.scraper.pending_invalid_session_alerts()
@@ -184,14 +234,28 @@ class SyncService:
             )
             if not sessions:
                 return None
-            notification = await self.notifier.notify_invalid_credentials(
-                sessions=sessions, cause=cause
-            )
-            if notification:
+            results: dict[str, Any] = {}
+            sent = False
+            for channel, notifier in (
+                ("bark", self.notifier),
+                ("telegram", self.telegram_notifier),
+            ):
+                if not notifier:
+                    continue
+                try:
+                    result = await notifier.notify_invalid_credentials(
+                        sessions=sessions, cause=cause
+                    )
+                    if result:
+                        results[channel] = result
+                        sent = True
+                except Exception as error:
+                    results[channel] = {"sent": False, "error": str(error)}
+            if sent:
                 self.scraper.mark_invalid_session_alerted(
                     [str(item.get("label") or "") for item in sessions]
                 )
-            return notification
+            return {"sent": sent, "channels": results}
         except Exception as notification_error:
             return {"sent": False, "error": str(notification_error)}
 

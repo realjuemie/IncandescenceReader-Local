@@ -81,6 +81,12 @@ class AdminAuth:
             self._sessions[token] = now + self.SESSION_SECONDS
             return True
 
+    def issue_session(self) -> str:
+        """Issue an admin session after another trusted authentication flow."""
+
+        with self._lock:
+            return self._issue_session_unlocked()
+
     def logout(self, cookie_header: str | None) -> None:
         token = self._cookie_token(cookie_header)
         if token:

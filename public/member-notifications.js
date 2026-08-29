@@ -36,11 +36,13 @@
     notificationDialog.innerHTML = `
       <form method="dialog" class="member-notification-card" id="member-notification-form">
         <header>
-          <div><span class="eyebrow">PERSONAL ALERTS</span><h2>${t("myBark")}</h2></div>
+          <div><span class="eyebrow">PERSONAL ALERTS</span><h2>${i18n.locale === "en" ? "My notifications" : "我的通知"}</h2></div>
           <button type="button" class="member-notification-close" aria-label="${i18n.locale === "en" ? "Close" : "关闭"}">×</button>
         </header>
         <p class="member-notification-intro">${t("personalAlertIntro")}</p>
         <label class="member-notification-toggle"><input type="checkbox" id="member-bark-enabled"> ${t("enableMyAlerts")}</label>
+        <label class="member-notification-toggle member-telegram-toggle"><input type="checkbox" id="member-telegram-enabled"> ${i18n.locale === "en" ? "Send the same alerts through Telegram" : "同时通过 Telegram 接收这些通知"}</label>
+        <div class="member-telegram-status-row"><p class="member-telegram-state" id="member-telegram-state"></p><button type="button" class="text-button" id="member-telegram-test">${i18n.locale === "en" ? "Test Telegram" : "测试 Telegram"}</button></div>
         <div class="member-notification-fields">
           <label>${i18n.locale === "en" ? "Bark server URL" : "Bark 服务器地址"}<input type="url" id="member-bark-server" autocomplete="off" spellcheck="false" placeholder="https://api.day.app"></label>
           <label>Device Key<input type="password" id="member-bark-key" autocomplete="new-password" spellcheck="false" placeholder="${t("copyFromBark")}"></label>
@@ -67,6 +69,7 @@
     );
     notificationDialog.querySelector("#member-notification-form").addEventListener("submit", save);
     notificationDialog.querySelector("#member-bark-test").addEventListener("click", test);
+    notificationDialog.querySelector("#member-telegram-test").addEventListener("click", testTelegram);
     notificationDialog.querySelector("#member-bark-clear").addEventListener("click", clearKey);
     return notificationDialog;
   }
@@ -87,6 +90,16 @@
 
   function fill() {
     notificationDialog.querySelector("#member-bark-enabled").checked = Boolean(settings.enabled);
+    const telegramToggle = notificationDialog.querySelector("#member-telegram-enabled");
+    telegramToggle.checked = Boolean(settings.telegramEnabled);
+    telegramToggle.disabled = !settings.telegramBound;
+    const telegramState = notificationDialog.querySelector("#member-telegram-state");
+    telegramState.textContent = settings.telegramBound
+      ? (i18n.locale === "en"
+        ? `Bound to Telegram ${settings.telegramUserId}${settings.telegramUsername ? ` (@${settings.telegramUsername})` : ""}`
+        : `已绑定 Telegram ${settings.telegramUserId}${settings.telegramUsername ? `（@${settings.telegramUsername}）` : ""}`)
+      : (i18n.locale === "en" ? "Open this site from the Telegram Mini App to bind your identity." : "请从 Telegram Mini App 打开本站完成身份绑定。 ");
+    notificationDialog.querySelector("#member-telegram-test").hidden = !settings.telegramBound;
     notificationDialog.querySelector("#member-bark-server").value = settings.serverUrl || "https://api.day.app";
     const key = notificationDialog.querySelector("#member-bark-key");
     key.value = "";
@@ -121,6 +134,7 @@
     const key = notificationDialog.querySelector("#member-bark-key").value.trim();
     const body = {
       enabled: notificationDialog.querySelector("#member-bark-enabled").checked,
+      telegramEnabled: notificationDialog.querySelector("#member-telegram-enabled").checked,
       serverUrl: notificationDialog.querySelector("#member-bark-server").value.trim(),
       group: notificationDialog.querySelector("#member-bark-group").value.trim(),
       accountIds: [...notificationDialog.querySelectorAll("#member-bark-accounts input:checked")]
@@ -159,6 +173,21 @@
     }
   }
 
+  async function testTelegram() {
+    if (!settings?.telegramBound) return setResult(i18n.locale === "en" ? "Bind Telegram first." : "请先绑定 Telegram。", true);
+    const button = notificationDialog.querySelector("#member-telegram-test");
+    button.disabled = true;
+    setResult(i18n.locale === "en" ? "Sending Telegram test…" : "正在发送 Telegram 测试…");
+    try {
+      await currentApi("/api/member/notifications/test", {
+        method: "POST", body: { channel: "telegram" },
+      });
+      setResult(i18n.locale === "en" ? "Telegram test delivered." : "Telegram 测试通知已送达。", false);
+    } catch (error) {
+      setResult(error.message, true);
+    } finally { button.disabled = false; }
+  }
+
   async function clearKey() {
     if (!settings?.deviceKeyConfigured || !window.confirm(t("confirmClearMemberKey"))) return;
     const selected = [...notificationDialog.querySelectorAll("#member-bark-accounts input:checked")]
@@ -168,6 +197,7 @@
         method: "PUT",
         body: {
           enabled: false,
+          telegramEnabled: notificationDialog.querySelector("#member-telegram-enabled").checked,
           serverUrl: notificationDialog.querySelector("#member-bark-server").value.trim(),
           group: notificationDialog.querySelector("#member-bark-group").value.trim(),
           accountIds: selected,

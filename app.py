@@ -12,10 +12,11 @@ from incandescence.config import ConfigStore, runtime_paths, server_address
 from incandescence.database import Database
 from incandescence.media import MediaStore
 from incandescence.member_auth import MemberAuth
-from incandescence.notifications import BarkNotifier
+from incandescence.notifications import BarkNotifier, TelegramNotifier
 from incandescence.scraper import FreeXScraper
 from incandescence.share_auth import ShareAuth
 from incandescence.sync_service import Scheduler, SyncService
+from incandescence.telegram import TelegramBotClient, TelegramService
 from incandescence.web import Application, create_server
 
 
@@ -34,8 +35,19 @@ def main() -> None:
     scraper_runtime = AsyncRuntime()
     media = MediaStore(data_dir, database, proxy_url_getter=config.proxy_url)
     notifier = BarkNotifier(config)
+    telegram_client = TelegramBotClient(config)
+    telegram_notifier = TelegramNotifier(config, telegram_client)
+    telegram_service = TelegramService(
+        config, database, admin_auth, member_auth, telegram_client
+    )
     sync_service = SyncService(
-        database, config, scraper, media, scraper_runtime, notifier=notifier
+        database,
+        config,
+        scraper,
+        media,
+        scraper_runtime,
+        notifier=notifier,
+        telegram_notifier=telegram_notifier,
     )
     scheduler = Scheduler(config, sync_service)
     application = Application(
@@ -51,6 +63,9 @@ def main() -> None:
         sync_service=sync_service,
         scheduler=scheduler,
         scraper_runtime=scraper_runtime,
+        telegram_client=telegram_client,
+        telegram_notifier=telegram_notifier,
+        telegram_service=telegram_service,
     )
     server = create_server((host, port), application)
     scheduler.start()

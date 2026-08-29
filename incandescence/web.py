@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hmac
 import json
 import mimetypes
 import re
 import shutil
+import threading
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -17,7 +19,7 @@ from .auth import AdminAuth
 from .config import ConfigStore, normalize_proxy_url
 from .database import Database, _file_url
 from .member_auth import MemberAuth
-from .notifications import BarkNotifier
+from .notifications import BarkNotifier, TelegramNotifier
 from .scraper import (
     CredentialValidationUnavailableError,
     FreeXScraper,
@@ -25,6 +27,7 @@ from .scraper import (
 )
 from .share_auth import ShareAuth
 from .sync_service import Scheduler, SyncBusyError, SyncService
+from .telegram import TelegramAuthError, TelegramBotClient, TelegramService
 
 
 class Application:
@@ -43,6 +46,9 @@ class Application:
         sync_service: SyncService,
         scheduler: Scheduler,
         scraper_runtime: AsyncRuntime,
+        telegram_client: TelegramBotClient | None = None,
+        telegram_notifier: TelegramNotifier | None = None,
+        telegram_service: TelegramService | None = None,
     ):
         self.data_dir = data_dir.resolve()
         self.public_dir = public_dir.resolve()
@@ -56,6 +62,9 @@ class Application:
         self.sync_service = sync_service
         self.scheduler = scheduler
         self.scraper_runtime = scraper_runtime
+        self.telegram_client = telegram_client
+        self.telegram_notifier = telegram_notifier
+        self.telegram_service = telegram_service
 
     def account_public(
         self, account: dict[str, Any], *, include_admin: bool = False
@@ -156,6 +165,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                     self.app.member_auth.notification_settings(int(member["id"]))
                 )
                 return
+            if path == "/api/telegram/status":
+                settings = self.app.config.get()
+                self._json(
+                    {
+                        "enabled": bool(settings.get("telegramEnabled")),
+                        "botUsername": settings.get("telegramBotUsername") or "",
+                    }
+                )
+                return
             if path == "/api/public/accounts":
                 member = self._member()
                 is_admin = self._admin_authenticated() and member is None
@@ -252,6 +270,9 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/admin/members":
                 self._json({"items": self.app.member_auth.list_members()})
                 return
+            if path == "/api/admin/telegram/users":
+                self._json({"items": self.app.database.list_telegram_users()})
+                return
             if path.startswith("/files/"):
                 self._serve_data_file(path.removeprefix("/files/"))
                 return
@@ -287,6 +308,62 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             path = urlsplit(self.path).path
             body = self._read_json()
+            if path == "/api/telegram/auth":
+                if not self.app.telegram_service:
+                    raise RuntimeError("Telegram 服务尚未加载")
+                current = self._member()
+                result = self.app.telegram_service.authenticate(
+                    str(body.get("initData") or ""),
+                    current_member_id=int(current["id"]) if current else None,
+                )
+                response = {
+                    "authenticated": result["role"] in ("admin", "member"),
+                    "role": result["role"],
+                    "member": result.get("member"),
+                    "telegramUser": {
+                        "id": result["user"].get("id"),
+                        "username": result["user"].get("username") or "",
+                        "firstName": result["user"].get("first_name") or "",
+                    },
+                }
+                headers = None
+                if result["role"] == "admin":
+                    headers = {
+                        "Set-Cookie": self.app.admin_auth.session_cookie(result["token"])
+                    }
+                elif result["role"] == "member":
+                    headers = {
+                        "Set-Cookie": self.app.member_auth.session_cookie(result["token"])
+                    }
+                self._json(response, headers=headers)
+                return
+            webhook_match = re.fullmatch(
+                r"/api/telegram/webhook/([A-Za-z0-9_-]{24,128})", path
+            )
+            if webhook_match:
+                if not self.app.telegram_service:
+                    raise RuntimeError("Telegram 服务尚未加载")
+                expected = str(
+                    self.app.config.get().get("telegramWebhookSecret") or ""
+                )
+                supplied_path = webhook_match.group(1)
+                supplied_header = str(
+                    self.headers.get("X-Telegram-Bot-Api-Secret-Token") or ""
+                )
+                if (
+                    not expected
+                    or not hmac.compare_digest(supplied_path, expected)
+                    or not hmac.compare_digest(supplied_header, expected)
+                ):
+                    raise TelegramAuthError("Telegram Webhook 验证失败")
+                threading.Thread(
+                    target=self._dispatch_telegram_update,
+                    args=(body,),
+                    daemon=True,
+                    name="telegram-webhook",
+                ).start()
+                self._json({"ok": True})
+                return
             if path == "/api/member/login":
                 token, member = self.app.member_auth.login(
                     str(body.get("username") or ""), str(body.get("password") or "")
@@ -308,6 +385,19 @@ class RequestHandler(BaseHTTPRequestHandler):
                 settings = self.app.database.get_member_notification_settings(
                     int(member["id"])
                 )
+                if str(body.get("channel") or "").lower() == "telegram":
+                    if not settings["telegram_bound"]:
+                        raise ValueError("请先绑定 Telegram")
+                    if not self.app.telegram_client:
+                        raise RuntimeError("Telegram 服务尚未加载")
+                    asyncio.run(
+                        self.app.telegram_client.send_message(
+                            settings["telegram_user_id"],
+                            "X拾光 · 会员通知测试成功\n这个 Telegram 账号已经可以接收你订阅的更新提醒。",
+                        )
+                    )
+                    self._json({"sent": True, "channel": "telegram"})
+                    return
                 if not settings["device_key"]:
                     raise ValueError("请先填写并保存 Bark Device Key")
                 accounts = self.app.database.list_accounts(member_id=int(member["id"]))
@@ -365,6 +455,15 @@ class RequestHandler(BaseHTTPRequestHandler):
                 )
                 self._json(item, HTTPStatus.CREATED)
                 return
+            match = re.fullmatch(r"/api/admin/telegram/users/(\d+)/grant", path)
+            if match:
+                if not self.app.telegram_service:
+                    raise RuntimeError("Telegram 服务尚未加载")
+                result = asyncio.run(
+                    self.app.telegram_service.grant_member(match.group(1))
+                )
+                self._json(result)
+                return
             if path == "/api/admin/cookies/inspect":
                 self._json(inspect_cookie_input(str(body.get("cookies") or "")))
                 return
@@ -382,6 +481,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                 icon_url = str(accounts[0].get("profile_image_url") or "") if accounts else ""
                 result = asyncio.run(self.app.notifier.test(icon_url=icon_url or None))
                 self._json(result)
+                return
+            if path == "/api/admin/telegram/test":
+                if not self.app.telegram_client:
+                    raise RuntimeError("Telegram 服务尚未加载")
+                if body.get("sendNotification"):
+                    if not self.app.telegram_notifier:
+                        raise RuntimeError("Telegram 通知服务尚未加载")
+                    result = asyncio.run(self.app.telegram_notifier.test())
+                else:
+                    token = str(body.get("botToken") or "").strip() or None
+                    result = asyncio.run(self.app.telegram_client.test(token=token))
+                self._json(result)
+                return
+            if path == "/api/admin/telegram/deploy":
+                if not self.app.telegram_client:
+                    raise RuntimeError("Telegram 服务尚未加载")
+                self._json(asyncio.run(self.app.telegram_client.deploy()))
                 return
             if path == "/api/admin/scraper-sessions":
                 item = self.app.scraper_runtime.run(
@@ -426,11 +542,21 @@ class RequestHandler(BaseHTTPRequestHandler):
                 share = self.app.share_auth.create(
                     int(match.group(1)), body.get("expiresInMinutes")
                 )
+                bot_username = str(
+                    self.app.config.get().get("telegramBotUsername") or ""
+                ).strip().lstrip("@")
+                telegram_url = ""
+                if re.fullmatch(r"[A-Za-z0-9_]{5,32}", bot_username):
+                    telegram_url = (
+                        f"https://t.me/{bot_username}"
+                        f"?startapp=share_{share['token']}"
+                    )
                 self._json(
                     {
                         "accountId": share["accountId"],
                         "expiresAt": share["expiresAt"],
                         "url": f"/s/{share['token']}",
+                        "telegramUrl": telegram_url,
                     },
                     HTTPStatus.CREATED,
                 )
@@ -463,6 +589,7 @@ class RequestHandler(BaseHTTPRequestHandler):
                     clear_device_key=bool(body.get("clearDeviceKey", False)),
                     group=body.get("group"),
                     account_ids=body.get("accountIds", []),
+                    telegram_enabled=bool(body.get("telegramEnabled", False)),
                 )
                 self._json(settings)
                 return
@@ -471,6 +598,15 @@ class RequestHandler(BaseHTTPRequestHandler):
             if path == "/api/admin/settings":
                 if body.pop("barkClearDeviceKey", False):
                     body["barkDeviceKey"] = ""
+                if not str(body.get("telegramBotToken") or "").strip():
+                    body.pop("telegramBotToken", None)
+                if not str(body.get("telegramApiHash") or "").strip():
+                    body.pop("telegramApiHash", None)
+                if body.pop("telegramClearBotToken", False):
+                    body["telegramBotToken"] = ""
+                    body["telegramEnabled"] = False
+                if body.pop("telegramClearApiHash", False):
+                    body["telegramApiHash"] = ""
                 settings = self.app.config.update(body)
                 self.app.scheduler.reload()
                 self._json(self._admin_settings(settings))
@@ -497,12 +633,32 @@ class RequestHandler(BaseHTTPRequestHandler):
                 return
             match = re.fullmatch(r"/api/admin/members/(\d+)", path)
             if match:
-                item = self.app.member_auth.update_member(
-                    int(match.group(1)),
-                    active=bool(body.get("active", True)),
-                    account_ids=body.get("accountIds") or [],
-                    password=str(body.get("password") or ""),
+                member_id = int(match.group(1))
+                previous = next(
+                    item
+                    for item in self.app.member_auth.list_members()
+                    if int(item["id"]) == member_id
                 )
+                requested_account_ids = body.get("accountIds") or []
+                added_account_ids = sorted(
+                    {int(value) for value in requested_account_ids}
+                    - set(previous.get("accountIds") or [])
+                )
+                item = self.app.member_auth.update_member(
+                    member_id,
+                    active=bool(body.get("active", True)),
+                    account_ids=requested_account_ids,
+                    password=str(body.get("password") or ""),
+                    telegram_user_id=(
+                        body.get("telegramUserId") if "telegramUserId" in body else None
+                    ),
+                )
+                if self.app.telegram_service and added_account_ids:
+                    item["accessNotification"] = asyncio.run(
+                        self.app.telegram_service.notify_account_access_granted(
+                            member_id, added_account_ids
+                        )
+                    )
                 self._json(item)
                 return
             self._error(HTTPStatus.NOT_FOUND, "接口不存在")
@@ -552,6 +708,12 @@ class RequestHandler(BaseHTTPRequestHandler):
             raise ValueError("请求内容必须是对象")
         return value
 
+    def _dispatch_telegram_update(self, update: dict[str, Any]) -> None:
+        try:
+            asyncio.run(self.app.telegram_service.handle_update(update))
+        except Exception as error:
+            self.log_error("Telegram update processing failed: %s", error)
+
     def _admin_authenticated(self) -> bool:
         return self.app.admin_auth.authenticated(self.headers.get("Cookie"))
 
@@ -574,6 +736,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         result = dict(settings or self.app.config.get())
         result["barkDeviceKeyConfigured"] = bool(result.get("barkDeviceKey"))
         result["barkDeviceKey"] = ""
+        result["telegramBotTokenConfigured"] = bool(result.get("telegramBotToken"))
+        result["telegramApiHashConfigured"] = bool(result.get("telegramApiHash"))
+        result["telegramBotToken"] = ""
+        result["telegramApiHash"] = ""
+        result["telegramWebhookSecret"] = ""
         return result
 
     def _require_visible_account(self, account_id: int) -> None:
@@ -757,7 +924,10 @@ class RequestHandler(BaseHTTPRequestHandler):
     def _handle_error(self, error: Exception) -> None:
         if isinstance(error, KeyError):
             self._error(HTTPStatus.NOT_FOUND, str(error).strip("'"))
-        elif isinstance(error, (AdminAuthenticationRequired, MemberAuthenticationRequired)):
+        elif isinstance(
+            error,
+            (AdminAuthenticationRequired, MemberAuthenticationRequired, TelegramAuthError),
+        ):
             self._error(HTTPStatus.UNAUTHORIZED, str(error))
         elif isinstance(error, (ValueError, FileNotFoundError)):
             self._error(HTTPStatus.BAD_REQUEST, str(error))
@@ -775,12 +945,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header(
             "Content-Security-Policy",
-            "default-src 'self'; script-src 'self'; style-src 'self'; "
+            "default-src 'self'; script-src 'self' https://telegram.org; style-src 'self'; "
             "img-src 'self' data:; media-src 'self'; connect-src 'self'; frame-ancestors 'none'",
         )
 
     def log_message(self, format: str, *args: Any) -> None:
-        print(f"[web] {self.address_string()} - {format % args}")
+        message = format % args
+        message = re.sub(
+            r"/api/telegram/webhook/[A-Za-z0-9_-]{24,128}",
+            "/api/telegram/webhook/[redacted]",
+            message,
+        )
+        print(f"[web] {self.address_string()} - {message}")
 
 
 def _first(query: dict[str, list[str]], key: str, default: Any = None) -> Any:

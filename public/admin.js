@@ -8,6 +8,8 @@ const state = {
   setupRequired: false,
   accounts: [],
   members: [],
+  telegramUsers: [],
+  telegramUsersExpanded: false,
   sessions: [],
   settings: null,
   health: null,
@@ -17,6 +19,7 @@ const state = {
   accountDrafts: new Map(),
   accountSearch: "",
   memberDrafts: new Map(),
+  memberAccessOpen: new Set(),
   shareAccount: null,
   shareMinutes: 1440,
 };
@@ -38,6 +41,7 @@ async function api(path, options = {}) {
 }
 
 async function initialize() {
+  await window.XGlowTelegram?.ready;
   bindEvents();
   try {
     const status = await api("/api/admin/status");
@@ -74,6 +78,10 @@ function bindEvents() {
   $("#save-bark").addEventListener("click", saveBark);
   $("#test-bark").addEventListener("click", testBark);
   $("#clear-bark-key").addEventListener("click", clearBarkKey);
+  $("#save-telegram").addEventListener("click", saveTelegram);
+  $("#test-telegram").addEventListener("click", () => testTelegram(false));
+  $("#test-telegram-notification").addEventListener("click", () => testTelegram(true));
+  $("#deploy-telegram").addEventListener("click", deployTelegram);
   $("#sync-all").addEventListener("click", syncAll);
   $("#retry-failed").addEventListener("click", syncFailed);
 }
@@ -143,18 +151,20 @@ async function logout() {
 }
 
 async function loadDashboard() {
-  const [accounts, sessions, settings, health, members] = await Promise.all([
+  const [accounts, sessions, settings, health, members, telegramUsers] = await Promise.all([
     api("/api/admin/accounts"),
     api("/api/admin/scraper-sessions"),
     api("/api/admin/settings"),
     api("/api/admin/health"),
     api("/api/admin/members"),
+    api("/api/admin/telegram/users"),
   ]);
   state.accounts = accounts.items;
   state.sessions = sessions.items;
   state.settings = settings;
   state.health = health;
   state.members = members.items;
+  state.telegramUsers = telegramUsers.items;
   renderDashboard();
 }
 
@@ -164,6 +174,7 @@ function renderDashboard() {
   renderSessions();
   renderAccounts();
   renderMembers();
+  renderTelegramUsers();
   fillSettings();
 }
 
@@ -540,6 +551,7 @@ function renderMembers() {
   for (const member of state.members) {
     const draft = state.memberDrafts.get(member.id);
     const selectedAccountIds = draft?.accountIds || member.accountIds;
+    const telegramUserId = draft?.telegramUserId ?? member.telegramUserId ?? "";
     const card = document.createElement("article");
     card.className = `admin-member-card${(draft?.active ?? member.active) ? "" : " inactive"}${draft ? " has-unsaved" : ""}`;
     card.dataset.memberId = String(member.id);
@@ -553,6 +565,10 @@ function renderMembers() {
     meta.textContent = member.lastLoginAt
       ? t("lastLogin", { time: relativeTime(member.lastLoginAt) })
       : t("createdAt", { time: relativeTime(member.createdAt) });
+    if (member.telegramUserId) {
+      const handle = member.telegramUsername ? ` @${member.telegramUsername}` : "";
+      meta.textContent += ` · Telegram ${member.telegramUserId}${handle}`;
+    }
     if (draft) {
       meta.textContent += ` · ${t("unsavedChanges")}`;
       meta.dataset.unsaved = "true";
@@ -567,10 +583,21 @@ function renderMembers() {
     active.append(activeInput, document.createTextNode(` ${t("allowLogin")}`));
     heading.append(identity, active);
 
-    const access = document.createElement("div");
+    const access = document.createElement("details");
     access.className = "member-access-block";
-    const accessTitle = document.createElement("strong");
+    access.open = state.memberAccessOpen.has(member.id);
+    access.addEventListener("toggle", () => {
+      if (access.open) state.memberAccessOpen.add(member.id);
+      else state.memberAccessOpen.delete(member.id);
+    });
+    const accessSummary = document.createElement("summary");
+    const accessTitle = document.createElement("span");
+    accessTitle.className = "member-access-title";
     accessTitle.textContent = t("visibleAccounts");
+    const accessCount = document.createElement("span");
+    accessCount.className = "member-access-count";
+    accessCount.textContent = t("selectedAccountCount", { count: selectedAccountIds.length });
+    accessSummary.append(accessTitle, accessCount);
     const choices = document.createElement("div");
     choices.className = "member-account-choices";
     if (!state.accounts.length) {
@@ -589,7 +616,7 @@ function renderMembers() {
       label.append(input, document.createTextNode(` @${account.username}${suffix}`));
       choices.append(label);
     }
-    access.append(accessTitle, choices);
+    access.append(accessSummary, choices);
 
     const footer = document.createElement("div");
     footer.className = "admin-member-footer";
@@ -599,13 +626,23 @@ function renderMembers() {
     password.placeholder = t("resetPasswordPlaceholder");
     password.dataset.memberPassword = "";
     password.value = draft?.password || "";
+    const telegramId = document.createElement("input");
+    telegramId.type = "text";
+    telegramId.inputMode = "numeric";
+    telegramId.autocomplete = "off";
+    telegramId.placeholder = i18n.locale === "en" ? "Telegram ID (optional)" : "Telegram ID（可选）";
+    telegramId.dataset.memberTelegramId = "";
+    telegramId.value = telegramUserId;
     const actions = document.createElement("div");
     actions.className = "row-actions";
     actions.append(
       memberActionButton(t("savePermissions"), "save-member", member.id),
       memberActionButton(t("deleteMember"), "delete-member", member.id, true),
     );
-    footer.append(password, actions);
+    const identityFields = document.createElement("div");
+    identityFields.className = "admin-member-identity-fields";
+    identityFields.append(password, telegramId);
+    footer.append(identityFields, actions);
     card.append(heading, access, footer);
     list.append(card);
   }
@@ -617,16 +654,23 @@ function readMemberDraft(card) {
     accountIds: [...card.querySelectorAll("[data-member-account-id]:checked")]
       .map((input) => Number(input.dataset.memberAccountId)),
     password: card.querySelector("[data-member-password]").value,
+    telegramUserId: card.querySelector("[data-member-telegram-id]").value.trim(),
   };
 }
 
 function rememberMemberDraft(event) {
-  if (!event.target.matches("[data-member-active], [data-member-account-id], [data-member-password]")) return;
+  if (!event.target.matches("[data-member-active], [data-member-account-id], [data-member-password], [data-member-telegram-id]")) return;
   const card = event.target.closest(".admin-member-card");
   if (!card) return;
   const id = Number(card.dataset.memberId);
   state.memberDrafts.set(id, readMemberDraft(card));
   card.classList.add("has-unsaved");
+  const accessCount = card.querySelector(".member-access-count");
+  if (accessCount) {
+    accessCount.textContent = t("selectedAccountCount", {
+      count: card.querySelectorAll("[data-member-account-id]:checked").length,
+    });
+  }
   const meta = card.querySelector(".admin-member-heading small");
   if (meta && !meta.dataset.unsaved) {
     meta.textContent += ` · ${t("unsavedChanges")}`;
@@ -651,6 +695,7 @@ async function handleMemberAction(event) {
           active: draft.active,
           accountIds: draft.accountIds,
           password: draft.password,
+          telegramUserId: draft.telegramUserId,
         },
       });
       state.members = state.members.map((item) => item.id === id ? saved : item);
@@ -764,7 +809,16 @@ function ensureShareDialog() {
           <button type="button" data-share-unit="1440">${t("days")}</button>
         </div>
       </div>
-      <label class="admin-share-result" id="admin-share-result" hidden>${t("shareLink")}<input id="admin-share-url" readonly></label>
+      <div class="admin-share-results" id="admin-share-results" hidden>
+        <div class="admin-share-result-row">
+          <label class="admin-share-result">${t("webShareLink")}<input id="admin-share-url" readonly></label>
+          <button type="button" class="secondary-button" data-share-copy="web">${t("copyAction")}</button>
+        </div>
+        <div class="admin-share-result-row" id="admin-share-telegram-row">
+          <label class="admin-share-result">${t("telegramShareLink")}<input id="admin-share-telegram-url" readonly></label>
+          <button type="button" class="secondary-button" data-share-copy="telegram">${t("copyAction")}</button>
+        </div>
+      </div>
       <div class="member-notification-result" id="admin-share-status" role="status"></div>
       <footer class="member-password-footer">
         <button type="button" class="secondary-button" id="admin-share-cancel">${t("cancel")}</button>
@@ -791,6 +845,22 @@ function ensureShareDialog() {
     updateShareDurationFromControls();
   });
   dialog.querySelector("#admin-share-value").addEventListener("input", updateShareDurationFromControls);
+  dialog.querySelector("#admin-share-results").addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-share-copy]");
+    if (!button) return;
+    const input = dialog.querySelector(
+      button.dataset.shareCopy === "telegram"
+        ? "#admin-share-telegram-url"
+        : "#admin-share-url",
+    );
+    if (!input.value) return;
+    try {
+      await copyText(input.value, input);
+      showToast(t("linkCopied"));
+    } catch (error) {
+      showToast(error.message, true);
+    }
+  });
   dialog.addEventListener("click", (event) => { if (event.target === dialog) dialog.close(); });
   return dialog;
 }
@@ -847,8 +917,9 @@ function openShareDialog(account) {
   const dialog = ensureShareDialog();
   state.shareAccount = account;
   dialog.querySelector("#admin-share-intro").textContent = t("temporaryShareIntro", { username: account.username });
-  dialog.querySelector("#admin-share-result").hidden = true;
+  dialog.querySelector("#admin-share-results").hidden = true;
   dialog.querySelector("#admin-share-url").value = "";
+  dialog.querySelector("#admin-share-telegram-url").value = "";
   dialog.querySelector("#admin-share-status").textContent = "";
   setShareDuration(1440);
   dialog.showModal();
@@ -870,7 +941,10 @@ async function createTemporaryShare(event) {
     const url = new URL(result.url, window.location.origin).href;
     const output = dialog.querySelector("#admin-share-url");
     output.value = url;
-    dialog.querySelector("#admin-share-result").hidden = false;
+    const telegramOutput = dialog.querySelector("#admin-share-telegram-url");
+    telegramOutput.value = result.telegramUrl || "";
+    dialog.querySelector("#admin-share-telegram-row").hidden = !result.telegramUrl;
+    dialog.querySelector("#admin-share-results").hidden = false;
     await copyText(url, output);
     const expiry = new Intl.DateTimeFormat(i18n.localeTag(), {
       dateStyle: "medium", timeStyle: "short",
@@ -922,6 +996,202 @@ function fillSettings() {
   $("#bark-key-state").textContent = settings.barkDeviceKeyConfigured
     ? t("keySavedHelp")
     : t("keyMissingHelp");
+  $("#telegram-enabled").checked = Boolean(settings.telegramEnabled);
+  $("#telegram-notifications-enabled").checked = Boolean(settings.telegramNotificationsEnabled);
+  $("#telegram-bot-token").value = "";
+  $("#telegram-bot-token").placeholder = settings.telegramBotTokenConfigured
+    ? (i18n.locale === "en" ? "Saved · leave blank to keep" : "已保存 · 留空保持不变")
+    : (i18n.locale === "en" ? "Paste BotFather token" : "粘贴 BotFather Token");
+  $("#telegram-admin-id").value = settings.telegramAdminUserId || "";
+  $("#telegram-api-id").value = settings.telegramApiId || "";
+  $("#telegram-api-hash").value = "";
+  $("#telegram-api-hash").placeholder = settings.telegramApiHashConfigured
+    ? (i18n.locale === "en" ? "Saved · leave blank to keep" : "已保存 · 留空保持不变")
+    : "api_hash";
+  $("#telegram-proxy-enabled").checked = Boolean(settings.telegramProxyEnabled);
+  $("#telegram-proxy-url").value = settings.telegramProxyUrl || "";
+  $("#telegram-deploy-state").textContent = settings.telegramDeployedAt
+    ? (i18n.locale === "en"
+      ? `Deployed as @${settings.telegramBotUsername || "bot"} · ${relativeTime(settings.telegramDeployedAt)}`
+      : `已部署 @${settings.telegramBotUsername || "bot"} · ${relativeTime(settings.telegramDeployedAt)}`)
+    : (i18n.locale === "en" ? "Not deployed to Telegram" : "尚未部署到 Telegram");
+}
+
+function telegramSettingsBody() {
+  const body = {
+    telegramEnabled: $("#telegram-enabled").checked,
+    telegramNotificationsEnabled: $("#telegram-notifications-enabled").checked,
+    telegramAdminUserId: $("#telegram-admin-id").value.trim(),
+    telegramApiId: $("#telegram-api-id").value.trim(),
+    telegramProxyEnabled: $("#telegram-proxy-enabled").checked,
+    telegramProxyUrl: $("#telegram-proxy-url").value.trim(),
+    siteBaseUrl: $("#site-base-url").value.trim(),
+  };
+  const token = $("#telegram-bot-token").value.trim();
+  const apiHash = $("#telegram-api-hash").value.trim();
+  if (token) body.telegramBotToken = token;
+  if (apiHash) body.telegramApiHash = apiHash;
+  return body;
+}
+
+async function saveTelegram({ quiet = false } = {}) {
+  const button = $("#save-telegram");
+  button.disabled = true;
+  try {
+    state.settings = await api("/api/admin/settings", {
+      method: "PUT", body: telegramSettingsBody(),
+    });
+    fillSettings();
+    $("#telegram-test-result").textContent = i18n.locale === "en" ? "Telegram settings saved" : "Telegram 配置已保存";
+    $("#telegram-test-result").className = "good";
+    if (!quiet) showToast(i18n.locale === "en" ? "Telegram settings saved" : "Telegram 配置已保存");
+    return true;
+  } catch (error) {
+    $("#telegram-test-result").textContent = error.message;
+    $("#telegram-test-result").className = "bad";
+    if (!quiet) showToast(error.message, true);
+    return false;
+  } finally { button.disabled = false; }
+}
+
+async function testTelegram(sendNotification) {
+  const button = sendNotification ? $("#test-telegram-notification") : $("#test-telegram");
+  const result = $("#telegram-test-result");
+  button.disabled = true;
+  result.textContent = i18n.locale === "en" ? "Contacting Telegram…" : "正在连接 Telegram…";
+  result.className = "testing";
+  try {
+    const body = sendNotification
+      ? { sendNotification: true }
+      : { botToken: $("#telegram-bot-token").value.trim() };
+    const response = await api("/api/admin/telegram/test", { method: "POST", body });
+    result.textContent = sendNotification
+      ? (i18n.locale === "en" ? "Test notification delivered" : "测试通知已送达")
+      : (i18n.locale === "en" ? `Connected to @${response.username}` : `已连接 @${response.username}`);
+    result.className = "good";
+  } catch (error) {
+    result.textContent = error.message;
+    result.className = "bad";
+  } finally { button.disabled = false; }
+}
+
+async function deployTelegram() {
+  const button = $("#deploy-telegram");
+  button.disabled = true;
+  try {
+    if (!await saveTelegram({ quiet: true })) return;
+    $("#telegram-test-result").textContent = i18n.locale === "en" ? "Deploying bot settings…" : "正在部署机器人设置…";
+    const result = await api("/api/admin/telegram/deploy", { method: "POST", body: {} });
+    state.settings = await api("/api/admin/settings");
+    fillSettings();
+    $("#telegram-test-result").textContent = i18n.locale === "en"
+      ? `Mini App deployed to @${result.username}`
+      : `Mini App 已部署到 @${result.username}`;
+    $("#telegram-test-result").className = "good";
+    showToast(i18n.locale === "en" ? "Telegram deployment complete" : "Telegram 部署完成");
+  } catch (error) {
+    $("#telegram-test-result").textContent = error.message;
+    $("#telegram-test-result").className = "bad";
+    showToast(error.message, true);
+  } finally { button.disabled = false; }
+}
+
+function renderTelegramUsers() {
+  const list = $("#telegram-user-list");
+  list.replaceChildren();
+  const users = [...state.telegramUsers].sort((left, right) => {
+    const recent = new Date(right.last_seen_at || 0) - new Date(left.last_seen_at || 0);
+    return recent || String(left.user_id).localeCompare(String(right.user_id));
+  });
+  if (!users.length) {
+    list.textContent = i18n.locale === "en"
+      ? "Users who start the bot will appear here."
+      : "启动过机器人的用户会显示在这里，管理员可据此复制 TG ID。";
+    return;
+  }
+  const visibleUsers = state.telegramUsersExpanded ? users : users.slice(0, 5);
+  for (const user of visibleUsers) {
+    const row = document.createElement("div");
+    row.className = "telegram-user-row";
+    const name = [user.first_name, user.last_name].filter(Boolean).join(" ")
+      || (user.username ? `@${user.username}` : `TG ${user.user_id}`);
+    const copy = document.createElement("div");
+    copy.className = "telegram-user-copy";
+    copy.innerHTML = `<strong></strong><small></small>`;
+    copy.querySelector("strong").textContent = name;
+    const status = user.member_id && Number(user.member_active)
+      ? (i18n.locale === "en" ? "Member" : "已授权会员")
+      : (i18n.locale === "en" ? "Pending" : "待授权");
+    const seen = user.last_seen_at ? relativeTime(user.last_seen_at) : "";
+    copy.querySelector("small").textContent = `${user.user_id} · ${status}${seen ? ` · ${seen}` : ""}`;
+    const actions = document.createElement("div");
+    actions.className = "telegram-user-actions";
+    const copyButton = document.createElement("button");
+    copyButton.type = "button";
+    copyButton.className = "text-button";
+    copyButton.textContent = i18n.locale === "en" ? "Copy ID" : "复制 ID";
+    copyButton.addEventListener("click", async () => {
+      await navigator.clipboard.writeText(String(user.user_id));
+      showToast(i18n.locale === "en" ? "Telegram ID copied" : "Telegram ID 已复制");
+    });
+    const upgradeButton = document.createElement("button");
+    upgradeButton.type = "button";
+    upgradeButton.className = "primary-button telegram-upgrade-button";
+    const isActiveMember = Boolean(user.member_id && Number(user.member_active));
+    upgradeButton.disabled = isActiveMember;
+    upgradeButton.textContent = isActiveMember
+      ? (i18n.locale === "en" ? "Member" : "已是会员")
+      : (user.member_id
+          ? (i18n.locale === "en" ? "Reactivate" : "重新启用")
+          : (i18n.locale === "en" ? "Upgrade" : "升级会员"));
+    upgradeButton.addEventListener("click", () => upgradeTelegramUser(user, upgradeButton));
+    actions.append(copyButton, upgradeButton);
+    row.append(copy, actions);
+    list.append(row);
+  }
+  if (users.length > 5) {
+    const toggle = document.createElement("button");
+    toggle.type = "button";
+    toggle.className = "secondary-button telegram-user-toggle";
+    toggle.setAttribute("aria-expanded", String(state.telegramUsersExpanded));
+    toggle.textContent = state.telegramUsersExpanded
+      ? (i18n.locale === "en" ? "Show less" : "收起")
+      : (i18n.locale === "en" ? `Show ${users.length - 5} more` : `展开其余 ${users.length - 5} 个`);
+    toggle.addEventListener("click", () => {
+      state.telegramUsersExpanded = !state.telegramUsersExpanded;
+      renderTelegramUsers();
+    });
+    list.append(toggle);
+  }
+}
+
+async function upgradeTelegramUser(user, button) {
+  button.disabled = true;
+  try {
+    const result = await api(`/api/admin/telegram/users/${encodeURIComponent(user.user_id)}/grant`, {
+      method: "POST",
+      body: {},
+    });
+    const [members, telegramUsers] = await Promise.all([
+      api("/api/admin/members"),
+      api("/api/admin/telegram/users"),
+    ]);
+    state.members = members.items;
+    state.telegramUsers = telegramUsers.items;
+    renderMembers();
+    renderTelegramUsers();
+    renderStats();
+    const delivered = result.notification?.sent;
+    showToast(
+      delivered
+        ? (i18n.locale === "en" ? "Member upgraded and notified" : "已升级会员并发送通知")
+        : (i18n.locale === "en" ? "Member upgraded, but notification was not delivered" : "会员已升级，但通知未能送达"),
+      !delivered,
+    );
+  } catch (error) {
+    showToast(error.message, true);
+    button.disabled = false;
+  }
 }
 
 async function saveBark() {

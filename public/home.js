@@ -98,6 +98,7 @@ async function api(path, options = {}) {
 }
 
 async function loadDirectory() {
+  await window.XGlowTelegram?.ready;
   try {
     const [response, memberStatus] = await Promise.all([
       api("/api/public/accounts"), api("/api/member/status"),

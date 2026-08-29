@@ -27,6 +27,7 @@ function currentAccount() {
 }
 
 async function initialize() {
+  await window.XGlowTelegram?.ready;
   bindEvents();
   try {
     const [response, memberStatus] = await Promise.all([

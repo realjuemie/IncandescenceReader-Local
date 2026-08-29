@@ -63,6 +63,7 @@ class MemberAuth:
         active: bool,
         account_ids: list[Any],
         password: str = "",
+        telegram_user_id: Any | None = None,
     ) -> dict[str, Any]:
         normalized_ids = self._validate_account_ids(account_ids)
         salt = digest = None
@@ -79,6 +80,10 @@ class MemberAuth:
             password_digest=digest,
             password_rounds=rounds,
         )
+        if telegram_user_id is not None:
+            member = self.database.bind_member_telegram(
+                member_id, str(telegram_user_id).strip() or None
+            )
         if not active or password:
             self.invalidate_member(member_id)
         return self._public_member_by_id(int(member["id"]))
@@ -90,13 +95,70 @@ class MemberAuth:
             raise ValueError("会员名或密码不正确")
         if not self._password_matches(member, password):
             raise ValueError("会员名或密码不正确")
+        return self.issue_session(int(member["id"]))
+
+    def issue_session(self, member_id: int) -> tuple[str, dict[str, Any]]:
+        member = self.database.get_member(member_id)
+        if not bool(member.get("active")):
+            raise ValueError("会员账号已停用")
         token = secrets.token_urlsafe(32)
         now = time.time()
         with self._lock:
             self._remove_expired_unlocked(now)
-            self._sessions[token] = (int(member["id"]), now + self.SESSION_SECONDS)
-        self.database.mark_member_login(int(member["id"]))
-        return token, self.public_member(self.database.get_member(int(member["id"])))
+            self._sessions[token] = (member_id, now + self.SESSION_SECONDS)
+        self.database.mark_member_login(member_id)
+        return token, self.public_member(self.database.get_member(member_id))
+
+    def login_telegram(
+        self, user: dict[str, Any]
+    ) -> tuple[str, dict[str, Any]] | None:
+        member = self.database.get_member_by_telegram_user_id(user.get("id"))
+        if not member or not bool(member.get("active")):
+            return None
+        self.database.bind_member_telegram(int(member["id"]), user)
+        return self.issue_session(int(member["id"]))
+
+    def bind_telegram(self, member_id: int, user: dict[str, Any]) -> dict[str, Any]:
+        member = self.database.get_member(member_id)
+        current_id = str(member.get("telegram_user_id") or "")
+        incoming_id = str(user.get("id") or "")
+        if current_id and current_id != incoming_id:
+            raise ValueError("该会员已经绑定其他 Telegram ID")
+        self.database.bind_member_telegram(member_id, user)
+        return self._public_member_by_id(member_id)
+
+    def create_telegram_member(
+        self, user: dict[str, Any], account_ids: list[Any] | None = None
+    ) -> dict[str, Any]:
+        user_id = str(user.get("id") or "").strip()
+        existing = self.database.get_member_by_telegram_user_id(user_id)
+        if existing:
+            public = self._public_member_by_id(int(existing["id"]))
+            if not public["active"]:
+                public = self.update_member(
+                    int(existing["id"]),
+                    active=True,
+                    account_ids=public["accountIds"],
+                )
+            return public
+        username = self.normalize_username(user_id)
+        existing_username = self.database.get_member_by_username(username)
+        if existing_username:
+            if existing_username.get("telegram_user_id"):
+                raise ValueError("对应 Telegram ID 的会员名已被占用")
+            self.database.bind_member_telegram(int(existing_username["id"]), user)
+            public = self._public_member_by_id(int(existing_username["id"]))
+            if not public["active"]:
+                public = self.update_member(
+                    int(existing_username["id"]),
+                    active=True,
+                    account_ids=public["accountIds"],
+                )
+            return public
+        password = secrets.token_urlsafe(32)
+        member = self.create_member(username, password, account_ids or [])
+        self.database.bind_member_telegram(int(member["id"]), user)
+        return self._public_member_by_id(int(member["id"]))
 
     def change_password(
         self,
@@ -182,6 +244,10 @@ class MemberAuth:
             "serverUrl": settings["server_url"],
             "deviceKeyConfigured": bool(settings["device_key"]),
             "group": settings["group"],
+            "telegramEnabled": bool(settings["telegram_enabled"]),
+            "telegramBound": bool(settings["telegram_bound"]),
+            "telegramUserId": settings["telegram_user_id"],
+            "telegramUsername": settings["telegram_username"],
             "accountIds": settings["account_ids"],
             "availableAccounts": [
                 {
@@ -204,6 +270,7 @@ class MemberAuth:
         clear_device_key: bool,
         group: Any,
         account_ids: Any,
+        telegram_enabled: bool = False,
     ) -> dict[str, Any]:
         current = self.database.get_member_notification_settings(member_id)
         normalized_server = normalize_http_base_url(
@@ -224,8 +291,10 @@ class MemberAuth:
         normalized_ids = sorted({int(value) for value in account_ids})
         if enabled and not effective_key:
             raise ValueError("开启 Bark 推送前请填写 Device Key")
-        if enabled and not normalized_ids:
-            raise ValueError("开启 Bark 推送前请至少选择一个通知账号")
+        if telegram_enabled and not current["telegram_bound"]:
+            raise ValueError("请先绑定 Telegram，再开启 Telegram 推送")
+        if (enabled or telegram_enabled) and not normalized_ids:
+            raise ValueError("开启推送前请至少选择一个通知账号")
         self.database.update_member_notification_settings(
             member_id,
             enabled=enabled,
@@ -233,6 +302,7 @@ class MemberAuth:
             device_key=normalized_key,
             group=normalized_group,
             account_ids=normalized_ids,
+            telegram_enabled=telegram_enabled,
         )
         return self.notification_settings(member_id)
 
@@ -251,6 +321,14 @@ class MemberAuth:
             "accountIds": [int(value) for value in member.get("account_ids", [])],
             "lastLoginAt": member.get("last_login_at"),
             "createdAt": member.get("created_at"),
+            "telegramUserId": str(member.get("telegram_user_id") or ""),
+            "telegramUsername": str(member.get("telegram_username") or ""),
+            "telegramFirstName": str(member.get("telegram_first_name") or ""),
+            "telegramLastName": str(member.get("telegram_last_name") or ""),
+            "telegramPhotoUrl": str(member.get("telegram_photo_url") or ""),
+            "telegramNotificationsEnabled": bool(
+                member.get("telegram_notifications_enabled")
+            ),
         }
 
     def session_cookie(self, token: str) -> str:

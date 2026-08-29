@@ -23,6 +23,17 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "barkDeviceKey": "",
     "barkGroup": "XGlow",
     "siteBaseUrl": "",
+    "telegramEnabled": False,
+    "telegramNotificationsEnabled": False,
+    "telegramBotToken": "",
+    "telegramApiId": "",
+    "telegramApiHash": "",
+    "telegramAdminUserId": "",
+    "telegramWebhookSecret": "",
+    "telegramBotUsername": "",
+    "telegramDeployedAt": "",
+    "telegramProxyEnabled": False,
+    "telegramProxyUrl": "",
 }
 
 
@@ -67,6 +78,10 @@ class ConfigStore:
                 encoding="utf-8",
             )
             temporary.replace(self.path)
+            try:
+                self.path.chmod(0o600)
+            except OSError:
+                pass
             return data
 
     def proxy_url(self) -> str | None:
@@ -101,9 +116,36 @@ class ConfigStore:
             "siteBaseUrl": normalize_http_base_url(
                 data.get("siteBaseUrl"), field_name="站点访问地址", allow_path=False
             ),
+            "telegramEnabled": bool(data.get("telegramEnabled", False)),
+            "telegramNotificationsEnabled": bool(
+                data.get("telegramNotificationsEnabled", False)
+            ),
+            "telegramBotToken": normalize_telegram_bot_token(
+                data.get("telegramBotToken")
+            ),
+            "telegramApiId": normalize_telegram_api_id(data.get("telegramApiId")),
+            "telegramApiHash": normalize_telegram_api_hash(
+                data.get("telegramApiHash")
+            ),
+            "telegramAdminUserId": normalize_telegram_user_id(
+                data.get("telegramAdminUserId"), field_name="管理员 Telegram ID"
+            ),
+            "telegramWebhookSecret": normalize_telegram_webhook_secret(
+                data.get("telegramWebhookSecret")
+            ),
+            "telegramBotUsername": str(data.get("telegramBotUsername") or "")
+            .strip()
+            .lstrip("@")[:64],
+            "telegramDeployedAt": str(data.get("telegramDeployedAt") or "").strip()[:64],
+            "telegramProxyEnabled": bool(data.get("telegramProxyEnabled", False)),
+            "telegramProxyUrl": normalize_proxy_url(data.get("telegramProxyUrl")),
         }
         if normalized["barkEnabled"] and not normalized["barkDeviceKey"]:
             raise ValueError("开启 Bark 推送前请填写 Device Key")
+        if normalized["telegramEnabled"] and not normalized["telegramBotToken"]:
+            raise ValueError("开启 Telegram 前请填写 Bot Token")
+        if normalized["telegramProxyEnabled"] and not normalized["telegramProxyUrl"]:
+            raise ValueError("开启 Telegram 独立代理前请填写代理地址")
         return normalized
 
 
@@ -156,6 +198,51 @@ def normalize_bark_device_key(value: Any) -> str:
     if not re.fullmatch(r"[^\s/]{4,512}", key):
         raise ValueError("Bark Device Key 格式无效")
     return key
+
+
+def normalize_telegram_bot_token(value: Any) -> str:
+    token = str(value or "").strip()
+    if not token:
+        return ""
+    if not re.fullmatch(r"\d{6,16}:[A-Za-z0-9_-]{20,160}", token):
+        raise ValueError("Telegram Bot Token 格式无效")
+    return token
+
+
+def normalize_telegram_api_id(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not re.fullmatch(r"\d{4,15}", text):
+        raise ValueError("Telegram api_id 格式无效")
+    return text
+
+
+def normalize_telegram_api_hash(value: Any) -> str:
+    value = str(value or "").strip().lower()
+    if not value:
+        return ""
+    if not re.fullmatch(r"[a-f0-9]{32}", value):
+        raise ValueError("Telegram api_hash 格式无效")
+    return value
+
+
+def normalize_telegram_user_id(value: Any, *, field_name: str = "Telegram ID") -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not re.fullmatch(r"[1-9]\d{4,19}", text):
+        raise ValueError(f"{field_name}必须是 5–20 位数字")
+    return text
+
+
+def normalize_telegram_webhook_secret(value: Any) -> str:
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if not re.fullmatch(r"[A-Za-z0-9_-]{24,128}", text):
+        raise ValueError("Telegram Webhook 密钥格式无效")
+    return text
 
 
 def runtime_paths(project_root: Path) -> tuple[Path, Path]:

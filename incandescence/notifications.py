@@ -8,6 +8,7 @@ from urllib.parse import quote
 import httpx
 
 from .config import ConfigStore
+from .telegram import TelegramBotClient
 
 
 class BarkDeliveryError(RuntimeError):
@@ -167,6 +168,136 @@ class BarkNotifier:
             "status": int(response.status_code),
             "elapsedMs": round((time.perf_counter() - started) * 1000),
         }
+
+
+class TelegramNotifier:
+    def __init__(self, config: ConfigStore, client: TelegramBotClient):
+        self.config = config
+        self.client = client
+
+    async def test(self) -> dict[str, Any]:
+        settings = self.config.get()
+        chat_id = str(settings.get("telegramAdminUserId") or "")
+        if not chat_id:
+            raise ValueError("请先填写管理员 Telegram ID")
+        await self.client.send_message(
+            chat_id,
+            "X拾光 · Telegram 测试成功\n通知渠道已连接。后续账号出现新内容时会在这里提醒。",
+            reply_markup=self._link_button(
+                settings.get("siteBaseUrl"), "打开 X拾光", mini_app=True
+            ),
+        )
+        return {"sent": True}
+
+    async def notify_account_update(
+        self,
+        *,
+        account_id: int,
+        profile: dict[str, Any],
+        tweets: list[dict[str, Any]],
+        inserted: int,
+        chat_id: str | int | None = None,
+        admin: bool = False,
+    ) -> dict[str, Any] | None:
+        settings = self.config.get()
+        if not settings.get("telegramEnabled") or inserted <= 0:
+            return None
+        if admin and not settings.get("telegramNotificationsEnabled"):
+            return None
+        target = str(chat_id or settings.get("telegramAdminUserId") or "")
+        if not target:
+            return None
+        username = str(profile.get("username") or "unknown").lstrip("@")
+        display_name = str(profile.get("display_name") or username)
+        new_items = tweets[:inserted]
+        originals = sum(
+            1 for item in new_items if not item.get("is_reply") and not item.get("is_repost")
+        )
+        replies = sum(1 for item in new_items if item.get("is_reply"))
+        reposts = sum(1 for item in new_items if item.get("is_repost"))
+        media = sum(len(item.get("media") or []) for item in new_items)
+        kinds = [
+            label
+            for count, label in (
+                (originals, f"原创 {originals}"),
+                (replies, f"回复 {replies}"),
+                (reposts, f"转发 {reposts}"),
+                (media, f"媒体 {media}"),
+            )
+            if count
+        ]
+        newest = tweets[0] if tweets else {}
+        summary = _summary_text(newest.get("text"))
+        lines = [
+            f"@{username} 有 {inserted} 条新内容",
+            f"{display_name}（@{username}）",
+            "新增：" + " · ".join(kinds or [f"内容 {inserted}"]),
+        ]
+        if summary:
+            lines.append("最新：" + summary)
+        base_url = str(settings.get("siteBaseUrl") or "").rstrip("/")
+        target_url = (
+            f"{base_url}/reader?account={account_id}"
+            if base_url
+            else str(newest.get("source_url") or "")
+        )
+        await self.client.send_message(
+            target,
+            "\n".join(lines),
+            reply_markup=self._link_button(
+                target_url, "查看内容", mini_app=bool(base_url)
+            ),
+        )
+        return {"sent": True}
+
+    async def notify_invalid_credentials(
+        self, *, sessions: list[dict[str, Any]], cause: str | None = None
+    ) -> dict[str, Any] | None:
+        settings = self.config.get()
+        if (
+            not settings.get("telegramEnabled")
+            or not settings.get("telegramNotificationsEnabled")
+            or not settings.get("telegramAdminUserId")
+            or not sessions
+        ):
+            return None
+        lines = ["X 登录凭证失效，请在管理后台重新导入 Cookie："]
+        for item in sessions[:12]:
+            label = str(item.get("label") or "未命名凭证")
+            username = str(item.get("verifiedUsername") or "").lstrip("@")
+            identity = f"{label}（@{username}）" if username else label
+            lines.append(
+                f"• {identity}：{_summary_text(item.get('error') or '登录状态已失效')}"
+            )
+        if len(sessions) > 12:
+            lines.append(f"另有 {len(sessions) - 12} 个凭证失效")
+        if cause:
+            lines.append("触发原因：" + _summary_text(cause))
+        base_url = str(settings.get("siteBaseUrl") or "").rstrip("/")
+        await self.client.send_message(
+            settings["telegramAdminUserId"],
+            "\n".join(lines),
+            reply_markup=self._link_button(
+                f"{base_url}/admin#credential-panel" if base_url else "",
+                "处理凭证",
+                mini_app=bool(base_url),
+            ),
+        )
+        return {"sent": True}
+
+    @staticmethod
+    def _link_button(
+        url: Any, text: str, *, mini_app: bool = False
+    ) -> dict[str, Any] | None:
+        value = str(url or "").strip()
+        if not value.startswith(("https://", "http://")):
+            return None
+        button: dict[str, Any] = {"text": text}
+        if mini_app and value.startswith("https://"):
+            button["web_app"] = {"url": value}
+        else:
+            button["url"] = value
+        return {"inline_keyboard": [[button]]}
 
 
 def _summary_text(value: Any) -> str:

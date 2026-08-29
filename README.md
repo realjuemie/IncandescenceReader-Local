@@ -4,7 +4,7 @@
 
 > **XGlow is a local-first X/Twitter reader and incremental archive for Windows and NAS.** Content, media, accounts and notification settings stay on your own device.
 
-当前版本：**v4.14.0**
+当前版本：**v4.16.2**
 
 项目不使用付费 X API。它通过你自己的 X 网页登录 Cookie 和开源项目 [twscrape](https://github.com/vladkens/twscrape) 读取公开时间线，把文字、账号资料、图片、视频和 GIF 都保存到本机。网页内可添加并切换多个阅读账号，支持手动更新和定时更新。
 
@@ -27,6 +27,8 @@
 - 正文、原帖和引用内容中的 `@用户` 均可直达对应 X 主页
 - 可选 Bark 增量通知：包含账号头像、新增数量、内容摘要和阅读链接，并支持后台测试推送
 - 每位会员可单独设置 Bark Device Key 与订阅账号；X 登录凭证失效时可通知管理员
+- Telegram Mini App 自动登录：会员与管理员可绑定 Telegram ID，在 Telegram 内直接打开阅读站或 `/admin`
+- Telegram 机器人支持同步更新通知、凭证失效提醒，以及管理员 `/grant`、`/revoke` 会员授权命令；后台可一键升级最近使用机器人的用户，升级和新增专属账号权限都会主动通知本人
 - 完整 Cookie 自动提取、在线有效性验证和多抓取会话管理
 - HTTP、HTTPS、SOCKS5 代理设置与连接测试
 - 手动更新单个账号、手动更新全部账号；失败日志支持一键只重试尚未恢复的账号
@@ -142,6 +144,14 @@ http://127.0.0.1:7890
 在 `/admin` 的“Bark 更新通知”中填写 Bark 服务器地址和 App 提供的 Device Key。默认服务器是 `https://api.day.app`，也支持填写自建 Bark Server 地址。Device Key 保存后不会由管理接口回传到网页。
 
 “站点访问地址”应填写手机能够打开的地址，例如 `http://192.168.1.20:8787`。通知只在已有增量游标、且本次确实新增内容时发送；首次归档不会用历史内容刷屏。点击“测试推送”可以验证服务器和密钥。通知标题为 `@用户 有 N 条新内容`，正文包括内容类型和最新摘要，图标使用该 X 用户头像。
+
+### 设置 Telegram Mini App
+
+在 `/admin` 的“Telegram Mini App 与机器人”中填写 BotFather 提供的 Bot Token、管理员 Telegram ID，以及公开站点的 HTTPS 地址。保存后点击“保存并部署到 Telegram”，系统会自动设置 Webhook、机器人命令和聊天菜单按钮。Bot Token、Webhook 密钥及可选的 `api_hash` 只保存在 `data/settings.json`，管理接口不会回传原值。
+
+任意用户向机器人发送 `/whoami` 可以查看自己的 Telegram ID。管理员可使用 `/grant <TG_ID>` 创建并绑定会员，会员名即 TG ID、密码由服务器随机生成；也可在 Mini App 设置里从按最近活跃时间排列的用户列表一键升级，默认显示最近 5 人，其余用户可展开。两种升级方式都会向该用户发送成功通知；管理员后续为会员增加新的专属阅读账号时，机器人也会列出新增账号并通知本人。已授权用户从 Telegram 打开 Mini App 后会自动登录。`/revoke <TG_ID>` 可停用对应会员，`/admin` 会为管理员打开站内管理面板。会员也可以在登录网站后再从 Telegram 打开，以绑定现有会员账号。
+
+会员的 Bark 与 Telegram 通知共用同一组订阅账号，但两个渠道可以分别开启。Bot API 默认复用后台的网络代理，也可单独填写一个 Telegram 代理，方便 NAS 和本机使用不同出口。`api_id` 和 `api_hash` 仅为后续 MTProto 功能预留，当前 Mini App 登录和机器人通知只需要 Bot Token。
 
 ## 增量更新原理
 

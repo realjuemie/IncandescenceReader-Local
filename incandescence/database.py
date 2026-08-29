@@ -137,6 +137,14 @@ class Database:
                     bark_server_url TEXT NOT NULL DEFAULT 'https://api.day.app',
                     bark_device_key TEXT NOT NULL DEFAULT '',
                     bark_group TEXT NOT NULL DEFAULT 'XGlow',
+                    telegram_user_id TEXT,
+                    telegram_username TEXT NOT NULL DEFAULT '',
+                    telegram_first_name TEXT NOT NULL DEFAULT '',
+                    telegram_last_name TEXT NOT NULL DEFAULT '',
+                    telegram_photo_url TEXT NOT NULL DEFAULT '',
+                    telegram_notifications_enabled INTEGER NOT NULL DEFAULT 0,
+                    telegram_bound_at TEXT,
+                    telegram_last_seen_at TEXT,
                     last_login_at TEXT,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
@@ -154,6 +162,17 @@ class Database:
                     account_id INTEGER NOT NULL REFERENCES accounts(id) ON DELETE CASCADE,
                     created_at TEXT NOT NULL,
                     PRIMARY KEY(member_id, account_id)
+                );
+
+                CREATE TABLE IF NOT EXISTS telegram_users (
+                    user_id TEXT PRIMARY KEY,
+                    chat_id TEXT NOT NULL DEFAULT '',
+                    username TEXT NOT NULL DEFAULT '',
+                    first_name TEXT NOT NULL DEFAULT '',
+                    last_name TEXT NOT NULL DEFAULT '',
+                    photo_url TEXT NOT NULL DEFAULT '',
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL
                 );
 
                 CREATE TABLE IF NOT EXISTS temporary_shares (
@@ -196,9 +215,22 @@ class Database:
                 ("bark_server_url", "TEXT NOT NULL DEFAULT 'https://api.day.app'"),
                 ("bark_device_key", "TEXT NOT NULL DEFAULT ''"),
                 ("bark_group", "TEXT NOT NULL DEFAULT 'XGlow'"),
+                ("telegram_user_id", "TEXT"),
+                ("telegram_username", "TEXT NOT NULL DEFAULT ''"),
+                ("telegram_first_name", "TEXT NOT NULL DEFAULT ''"),
+                ("telegram_last_name", "TEXT NOT NULL DEFAULT ''"),
+                ("telegram_photo_url", "TEXT NOT NULL DEFAULT ''"),
+                ("telegram_notifications_enabled", "INTEGER NOT NULL DEFAULT 0"),
+                ("telegram_bound_at", "TEXT"),
+                ("telegram_last_seen_at", "TEXT"),
             ):
                 if column not in member_columns:
                     db.execute(f"ALTER TABLE members ADD COLUMN {column} {definition}")
+            db.execute(
+                """CREATE UNIQUE INDEX IF NOT EXISTS idx_members_telegram_user_id
+                   ON members(telegram_user_id)
+                   WHERE telegram_user_id IS NOT NULL AND telegram_user_id <> ''"""
+            )
             db.execute("UPDATE accounts SET syncing = 0")
             db.commit()
 
@@ -765,6 +797,7 @@ class Database:
             tweets_by_conv.setdefault(cid, []).append(public)
 
         page_ids = {str(item["id"]) for item in items}
+        page_by_id = {str(item["id"]): item for item in items}
         emitted: set[str] = set()
         collapsed: list[dict[str, Any]] = []
         for item in items:
@@ -784,6 +817,9 @@ class Database:
                 unique.append(entry)
             unique.sort(key=lambda entry: (entry.get("createdAt") or "", entry["id"]))
             lead = dict(public_by_id.get(newest_id, item) if newest_id else item)
+            original_lead = page_by_id.get(str(lead["id"]))
+            if original_lead and "repliedTo" in original_lead:
+                lead["repliedTo"] = original_lead["repliedTo"]
             if len(unique) > 1:
                 lead["thread"] = unique
                 root = next(
@@ -921,6 +957,133 @@ class Database:
             ).fetchall()
         return [int(row["id"]) for row in rows]
 
+    def upsert_telegram_user(
+        self, user: dict[str, Any], *, chat_id: str | int | None = None
+    ) -> dict[str, Any]:
+        user_id = self._telegram_id(user.get("id"))
+        now = utc_now()
+        values = (
+            user_id,
+            str(chat_id or "").strip(),
+            str(user.get("username") or "").strip(),
+            str(user.get("first_name") or "").strip(),
+            str(user.get("last_name") or "").strip(),
+            str(user.get("photo_url") or "").strip(),
+            now,
+            now,
+        )
+        with self.connection() as db:
+            db.execute(
+                """INSERT INTO telegram_users(
+                       user_id, chat_id, username, first_name, last_name, photo_url,
+                       first_seen_at, last_seen_at
+                   ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                   ON CONFLICT(user_id) DO UPDATE SET
+                       chat_id = CASE WHEN excluded.chat_id <> '' THEN excluded.chat_id
+                                      ELSE telegram_users.chat_id END,
+                       username = excluded.username,
+                       first_name = excluded.first_name,
+                       last_name = excluded.last_name,
+                       photo_url = CASE WHEN excluded.photo_url <> '' THEN excluded.photo_url
+                                        ELSE telegram_users.photo_url END,
+                       last_seen_at = excluded.last_seen_at""",
+                values,
+            )
+            db.commit()
+        return self.get_telegram_user(user_id)
+
+    def get_telegram_user(self, user_id: str | int) -> dict[str, Any]:
+        normalized = self._telegram_id(user_id)
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT * FROM telegram_users WHERE user_id = ?", (normalized,)
+            ).fetchone()
+        if not row:
+            raise KeyError("Telegram 用户不存在")
+        return dict(row)
+
+    def list_telegram_users(self) -> list[dict[str, Any]]:
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT tu.*, m.id AS member_id, m.active AS member_active,
+                          m.username AS member_username
+                   FROM telegram_users tu
+                   LEFT JOIN members m ON m.telegram_user_id = tu.user_id
+                   ORDER BY tu.last_seen_at DESC, tu.user_id"""
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def get_member_by_telegram_user_id(
+        self, user_id: str | int
+    ) -> dict[str, Any] | None:
+        normalized = self._telegram_id(user_id)
+        with self.connection() as db:
+            row = db.execute(
+                "SELECT * FROM members WHERE telegram_user_id = ?", (normalized,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def bind_member_telegram(
+        self, member_id: int, user: dict[str, Any] | str | int | None
+    ) -> dict[str, Any]:
+        if user is None or user == "":
+            with self.connection() as db:
+                changed = db.execute(
+                    """UPDATE members SET telegram_user_id = NULL,
+                           telegram_username = '', telegram_first_name = '',
+                           telegram_last_name = '', telegram_photo_url = '',
+                           telegram_notifications_enabled = 0,
+                           telegram_bound_at = NULL, telegram_last_seen_at = NULL,
+                           updated_at = ? WHERE id = ?""",
+                    (utc_now(), member_id),
+                ).rowcount
+                db.commit()
+            if not changed:
+                raise KeyError("会员不存在")
+            return self.get_member(member_id)
+
+        details = user if isinstance(user, dict) else {"id": user}
+        user_id = self._telegram_id(details.get("id"))
+        if not isinstance(user, dict):
+            try:
+                known = self.get_telegram_user(user_id)
+                details = {
+                    "id": user_id,
+                    "username": known.get("username") or "",
+                    "first_name": known.get("first_name") or "",
+                    "last_name": known.get("last_name") or "",
+                    "photo_url": known.get("photo_url") or "",
+                }
+            except KeyError:
+                pass
+        now = utc_now()
+        self.upsert_telegram_user(details)
+        try:
+            with self.connection() as db:
+                changed = db.execute(
+                    """UPDATE members SET telegram_user_id = ?, telegram_username = ?,
+                           telegram_first_name = ?, telegram_last_name = ?,
+                           telegram_photo_url = ?, telegram_bound_at = COALESCE(telegram_bound_at, ?),
+                           telegram_last_seen_at = ?, updated_at = ? WHERE id = ?""",
+                    (
+                        user_id,
+                        str(details.get("username") or "").strip(),
+                        str(details.get("first_name") or "").strip(),
+                        str(details.get("last_name") or "").strip(),
+                        str(details.get("photo_url") or "").strip(),
+                        now,
+                        now,
+                        now,
+                        member_id,
+                    ),
+                ).rowcount
+                db.commit()
+            if not changed:
+                raise KeyError("会员不存在")
+        except sqlite3.IntegrityError as error:
+            raise ValueError("该 Telegram ID 已绑定其他会员") from error
+        return self.get_member(member_id)
+
     def get_member_notification_settings(self, member_id: int) -> dict[str, Any]:
         member = self.get_member(member_id)
         accessible = set(self.member_accessible_account_ids(member_id))
@@ -935,6 +1098,10 @@ class Database:
             "server_url": str(member.get("bark_server_url") or "https://api.day.app"),
             "device_key": str(member.get("bark_device_key") or ""),
             "group": str(member.get("bark_group") or "XGlow"),
+            "telegram_enabled": bool(member.get("telegram_notifications_enabled")),
+            "telegram_bound": bool(member.get("telegram_user_id")),
+            "telegram_user_id": str(member.get("telegram_user_id") or ""),
+            "telegram_username": str(member.get("telegram_username") or ""),
             "account_ids": [
                 int(row["account_id"])
                 for row in rows
@@ -951,6 +1118,7 @@ class Database:
         device_key: str | None,
         group: str,
         account_ids: list[int],
+        telegram_enabled: bool | None = None,
     ) -> dict[str, Any]:
         unique_ids = sorted({int(value) for value in account_ids})
         accessible = set(self.member_accessible_account_ids(member_id))
@@ -962,8 +1130,13 @@ class Database:
                 changed = db.execute(
                     """UPDATE members SET bark_enabled = ?, bark_server_url = ?,
                            bark_device_key = COALESCE(?, bark_device_key), bark_group = ?,
+                           telegram_notifications_enabled = COALESCE(?, telegram_notifications_enabled),
                            updated_at = ? WHERE id = ?""",
-                    (int(enabled), server_url, device_key, group, utc_now(), member_id),
+                    (
+                        int(enabled), server_url, device_key, group,
+                        None if telegram_enabled is None else int(telegram_enabled),
+                        utc_now(), member_id,
+                    ),
                 ).rowcount
                 if not changed:
                     raise KeyError("会员不存在")
@@ -996,6 +1169,30 @@ class Database:
                    JOIN accounts a ON a.id = mna.account_id
                    WHERE mna.account_id = ? AND m.active = 1 AND m.bark_enabled = 1
                      AND m.bark_device_key <> ''
+                     AND (a.is_public = 1 OR EXISTS (
+                         SELECT 1 FROM member_account_access maa
+                         WHERE maa.member_id = m.id AND maa.account_id = a.id
+                     ))
+                   ORDER BY lower(m.username)""",
+                (account_id,),
+            ).fetchall()
+        return [dict(row) for row in rows]
+
+    def list_member_telegram_notification_targets(
+        self, account_id: int
+    ) -> list[dict[str, Any]]:
+        """Return authorized members who enabled Telegram update notifications."""
+
+        with self.connection() as db:
+            rows = db.execute(
+                """SELECT m.id AS member_id, m.username, m.telegram_user_id,
+                          m.telegram_username
+                   FROM member_notification_accounts mna
+                   JOIN members m ON m.id = mna.member_id
+                   JOIN accounts a ON a.id = mna.account_id
+                   WHERE mna.account_id = ? AND m.active = 1
+                     AND m.telegram_notifications_enabled = 1
+                     AND m.telegram_user_id IS NOT NULL AND m.telegram_user_id <> ''
                      AND (a.is_public = 1 OR EXISTS (
                          SELECT 1 FROM member_account_access maa
                          WHERE maa.member_id = m.id AND maa.account_id = a.id
@@ -1154,6 +1351,13 @@ class Database:
             db.execute("DELETE FROM accounts WHERE id = ?", (account_id,))
             db.commit()
         return account
+
+    @staticmethod
+    def _telegram_id(value: Any) -> str:
+        normalized = str(value or "").strip()
+        if not re.fullmatch(r"[1-9]\d{4,19}", normalized):
+            raise ValueError("Telegram ID 格式不正确")
+        return normalized
 
     @staticmethod
     def _encode_cursor(created_at: str, tweet_id: str) -> str:
