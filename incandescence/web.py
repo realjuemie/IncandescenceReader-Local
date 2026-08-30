@@ -765,7 +765,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if len(values) != 1 or not re.fullmatch(r"[1-9]\d*", values[0]):
             return False
         try:
-            self._require_visible_account(int(values[0]))
+            # Existence only. Visibility is enforced after Telegram/member/admin
+            # cookies are set by page JS; checking it here 404s Mini App deep links.
+            self.app.database.get_account(int(values[0]))
         except KeyError:
             return False
         return True

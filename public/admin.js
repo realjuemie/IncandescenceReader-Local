@@ -98,8 +98,14 @@ function handleAccountSearchKeydown(event) {
   renderAccounts();
 }
 
+function hideAdminLoading() {
+  const loading = $("#admin-loading-state");
+  if (loading) loading.hidden = true;
+}
+
 function showAuth(setupRequired) {
   state.setupRequired = Boolean(setupRequired);
+  hideAdminLoading();
   $("#admin-app").hidden = true;
   $("#auth-view").hidden = false;
   $("#auth-title").textContent = state.setupRequired ? t("setupAdmin") : (i18n.locale === "en" ? "Administrator sign in" : "管理员登录");
@@ -137,6 +143,7 @@ async function authenticate(event) {
 
 async function enterDashboard() {
   await loadDashboard();
+  hideAdminLoading();
   $("#auth-view").hidden = true;
   $("#admin-app").hidden = false;
   if (!state.pollingStarted) {

@@ -371,6 +371,7 @@ body.lightbox-open { overflow: hidden; }
 
 /* Admin authentication and application */
 .admin-body { background: var(--wash); }
+.admin-body > .reader-loading-state { background: #fff; }
 .admin-auth-view { min-height: 100vh; display: grid; place-items: center; padding: 24px; background: #fff; }
 .admin-auth-card { width: min(430px, 100%); padding: 38px; border: 1px solid var(--line-strong); border-radius: 16px; background: #fff; }
 .brand-mark.large { width: 52px; height: 52px; margin-bottom: 25px; border-radius: 15px; font-size: 25px; }
@@ -621,7 +622,7 @@ body.lightbox-open { overflow: hidden; }
 
 @media (max-width: 940px) {
   .app-shell { width: 100%; display: block; }
-  .sidebar { width: min(380px, calc(100vw - 12px)); height: 100dvh; position: fixed; left: 0; transform: translateX(-105%); padding-top: max(12px, env(safe-area-inset-top)); padding-right: 12px; padding-bottom: max(14px, env(safe-area-inset-bottom)); padding-left: max(12px, env(safe-area-inset-left)); border-right: 1px solid var(--line); box-shadow: 16px 0 40px rgba(15,20,25,.12); transition: transform .22s ease; }
+  .sidebar { width: min(340px, calc(100vw - 52px)); height: 100dvh; position: fixed; left: 0; transform: translateX(-105%); padding-top: max(12px, env(safe-area-inset-top)); padding-right: 12px; padding-bottom: max(14px, env(safe-area-inset-bottom)); padding-left: max(12px, env(safe-area-inset-left)); border-right: 1px solid var(--line); box-shadow: 16px 0 40px rgba(15,20,25,.12); transition: transform .22s ease; }
   .sidebar.open { transform: translateX(0); }
   .sidebar-scrim { position: fixed; inset: 0; z-index: 15; background: rgba(0,0,0,.36); touch-action: none; }
   .sidebar-scrim.show { display: block; }
@@ -636,6 +637,11 @@ body.lightbox-open { overflow: hidden; }
   body.telegram-mini-app .main-column { padding-top: calc(54px + max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px))); }
   body.telegram-mini-app .mobile-header { width: min(100%, 600px); position: fixed; top: 0; left: 50%; z-index: 50; transform: translateX(-50%); padding-top: max(env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px)); }
   body.telegram-mini-app .miniapp-scroll-top { width: 38px; height: 38px; display: grid; flex: 0 0 38px; }
+  body.telegram-mini-app .sidebar { z-index: 60; padding-top: max(12px, env(safe-area-inset-top), var(--tg-safe-area-inset-top, 0px)); }
+  body.telegram-mini-app .sidebar-scrim { z-index: 55; }
+  body.telegram-mini-app .mobile-only { display: grid; }
+  body.telegram-mini-app .brand-row .icon-button,
+  body.telegram-mini-app .sidebar-language-toggle { flex-shrink: 0; }
 }
 
 @media (max-width: 720px) {
@@ -811,7 +817,7 @@ body.lightbox-open { overflow: hidden; }
 
 @media (max-width: 360px) {
   html, body { min-width: 0; overflow-x: hidden; }
-  .sidebar { width: calc(100vw - 6px); padding-right: 9px; padding-left: max(9px, env(safe-area-inset-left)); }
+  .sidebar { width: min(340px, calc(100vw - 52px)); padding-right: 10px; padding-left: max(10px, env(safe-area-inset-left)); }
   .brand-row { gap: 7px; padding-right: 2px; padding-left: 2px; }
   .brand-row .brand-mark { width: 38px; height: 38px; }
   .brand-name { font-size: 15px; }
