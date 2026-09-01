@@ -10,6 +10,8 @@
 
 许可证：[GNU Affero General Public License v3.0](LICENSE)
 
+源码：https://github.com/realjuemie/XGlow
+
 ---
 
 ## 能力概览

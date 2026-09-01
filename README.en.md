@@ -10,6 +10,8 @@ XGlow does not call the official paid X API. It uses your own web-session cookie
 
 License: [GNU Affero General Public License v3.0](LICENSE)
 
+Source: https://github.com/realjuemie/XGlow
+
 ---
 
 ## Capabilities
