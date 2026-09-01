@@ -3,11 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <meta name="color-scheme" content="light">
+  <meta name="color-scheme" content="light dark">
+  <script>
+    (function () {
+      var theme = "";
+      try { theme = localStorage.getItem("xglow-theme") || ""; } catch (e) {}
+      var dark = theme === "dark";
+      if (theme !== "dark" && theme !== "light") {
+        try { dark = window.matchMedia("(prefers-color-scheme: dark)").matches; } catch (e) {}
+      }
+      document.documentElement.dataset.theme = dark ? "dark" : "light";
+      document.documentElement.style.colorScheme = dark ? "dark" : "light";
+    })();
+  </script>
   <title>X拾光 · X 内容阅读</title>
   <link rel="icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
   <link rel="shortcut icon" href="/xglow-favicon.png?v=4.13.1" type="image/png">
-  <link rel="stylesheet" href="/styles.css?v=4.16.6">
+  <link rel="stylesheet" href="/styles.css?v=4.18.0">
+  <link rel="stylesheet" href="/assistant/assistant.css?v=1.1.0">
 </head>
 <body>
   <div class="app-shell public-shell">
@@ -19,6 +32,7 @@
           <div class="brand-sub">PUBLIC READER</div>
         </div>
         <button class="language-toggle sidebar-language-toggle" type="button" data-language-toggle><span aria-hidden="true">文</span><b data-language-label>EN</b></button>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换明暗"><span aria-hidden="true" data-theme-icon>☾</span><b data-theme-label>暗</b></button>
         <button class="icon-button mobile-only" id="close-sidebar" aria-label="关闭侧栏">×</button>
       </div>
 
@@ -43,6 +57,7 @@
         <a class="mobile-home-link" href="/"><img src="/xglow-icon.png?v=4.13.1" alt=""><span>X拾光</span></a>
         <button class="icon-button miniapp-scroll-top" id="miniapp-scroll-top" type="button" aria-label="回到顶部" title="回到顶部" hidden>↑</button>
         <button class="language-toggle" type="button" data-language-toggle><span aria-hidden="true">文</span><b data-language-label>EN</b></button>
+        <button class="theme-toggle" type="button" data-theme-toggle aria-label="切换明暗"><span aria-hidden="true" data-theme-icon>☾</span><b data-theme-label>暗</b></button>
       </header>
 
       <section class="reader-loading-state" id="reader-loading-state" aria-live="polite">
@@ -130,9 +145,18 @@
 
   <div class="toast" id="toast" role="status"></div>
   <script src="https://telegram.org/js/telegram-web-app.js" defer></script>
-  <script src="/telegram-miniapp.js?v=4.16.1" defer></script>
+  <script src="/telegram-miniapp.js?v=4.17.9" defer></script>
   <script src="/i18n.js?v=4.16.0" defer></script>
-  <script src="/member-notifications.js?v=4.15.0" defer></script>
+  <script src="/member-notifications.js?v=4.17.7" defer></script>
   <script src="/app.js?v=4.16.4" defer></script>
+  <script src="/assistant/engine/geometry-data.js" defer></script>
+  <script src="/assistant/engine/math.js" defer></script>
+  <script src="/assistant/engine/tables.js" defer></script>
+  <script src="/assistant/engine/pose.js" defer></script>
+  <script src="/assistant/engine/tricks.js" defer></script>
+  <script src="/assistant/engine/fx.js" defer></script>
+  <script src="/assistant/engine/eyes.js" defer></script>
+  <script src="/assistant/engine/character.js" defer></script>
+  <script src="/assistant/assistant.js?v=1.1.0" defer></script>
 </body>
 </html>

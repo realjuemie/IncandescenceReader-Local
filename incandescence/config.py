@@ -34,7 +34,29 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "telegramDeployedAt": "",
     "telegramProxyEnabled": False,
     "telegramProxyUrl": "",
+    "assistantEnabled": True,
+    "assistantContactName": "作者",
+    "assistantContactTagline": "",
+    "assistantContactTelegram": "",
+    "assistantContactEmail": "",
+    "assistantContactHome": "",
+    "assistantContactX": "",
+    "assistantContactWechat": "",
+    "assistantCustom1Label": "",
+    "assistantCustom1Value": "",
+    "assistantCustom1Href": "",
+    "assistantCustom2Label": "",
+    "assistantCustom2Value": "",
+    "assistantCustom2Href": "",
+    "assistantCustom3Label": "",
+    "assistantCustom3Value": "",
+    "assistantCustom3Href": "",
 }
+
+
+def _bounded_text(value: Any, default: str = "", maximum: int = 80) -> str:
+    text = str(value if value is not None else default).strip()
+    return text[:maximum]
 
 
 def _bounded_int(value: Any, default: int, minimum: int, maximum: int) -> int:
@@ -139,6 +161,54 @@ class ConfigStore:
             "telegramDeployedAt": str(data.get("telegramDeployedAt") or "").strip()[:64],
             "telegramProxyEnabled": bool(data.get("telegramProxyEnabled", False)),
             "telegramProxyUrl": normalize_proxy_url(data.get("telegramProxyUrl")),
+            "assistantEnabled": bool(data.get("assistantEnabled", True)),
+            "assistantContactName": _bounded_text(
+                data.get("assistantContactName"), "作者", 32
+            )
+            or "作者",
+            "assistantContactTagline": _bounded_text(
+                data.get("assistantContactTagline"), "", 80
+            ),
+            "assistantContactTelegram": _bounded_text(
+                data.get("assistantContactTelegram"), "", 64
+            ),
+            "assistantContactEmail": _bounded_text(
+                data.get("assistantContactEmail"), "", 80
+            ),
+            "assistantContactHome": _bounded_text(
+                data.get("assistantContactHome"), "", 120
+            ),
+            "assistantContactX": _bounded_text(data.get("assistantContactX"), "", 64),
+            "assistantContactWechat": _bounded_text(
+                data.get("assistantContactWechat"), "", 64
+            ),
+            "assistantCustom1Label": _bounded_text(
+                data.get("assistantCustom1Label"), "", 24
+            ),
+            "assistantCustom1Value": _bounded_text(
+                data.get("assistantCustom1Value"), "", 80
+            ),
+            "assistantCustom1Href": _bounded_text(
+                data.get("assistantCustom1Href"), "", 160
+            ),
+            "assistantCustom2Label": _bounded_text(
+                data.get("assistantCustom2Label"), "", 24
+            ),
+            "assistantCustom2Value": _bounded_text(
+                data.get("assistantCustom2Value"), "", 80
+            ),
+            "assistantCustom2Href": _bounded_text(
+                data.get("assistantCustom2Href"), "", 160
+            ),
+            "assistantCustom3Label": _bounded_text(
+                data.get("assistantCustom3Label"), "", 24
+            ),
+            "assistantCustom3Value": _bounded_text(
+                data.get("assistantCustom3Value"), "", 80
+            ),
+            "assistantCustom3Href": _bounded_text(
+                data.get("assistantCustom3Href"), "", 160
+            ),
         }
         if normalized["barkEnabled"] and not normalized["barkDeviceKey"]:
             raise ValueError("开启 Bark 推送前请填写 Device Key")

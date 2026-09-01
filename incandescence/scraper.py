@@ -24,6 +24,10 @@ os.environ.setdefault("TWS_TELEMETRY", "0")
 NO_SESSION_MESSAGE = "没有可用的 X 登录会话，请在设置中添加 Cookie"
 RATE_LIMIT_MESSAGE = "X 请求额度暂时耗尽或会话被短暂锁定，Cookie 仍有效，请稍后再试"
 PROTECTED_UNFOLLOWED_MESSAGE = "是私密账号，当前 Cookie 都未关注，无法读取时间线"
+# Stop after this many already-archived timeline items in a row. Do NOT stop on
+# snowflake id <= last_tweet_id: X can omit one of a burst, and that hole sits
+# behind the newest id we already saved.
+KNOWN_TWEET_STOP_STREAK = 10
 
 
 def describe_no_account(sessions: list[dict[str, Any]] | None) -> str:
@@ -75,7 +79,31 @@ class FreeXScraper:
             raise ScraperUnavailableError(
                 "抓取组件未安装，请先运行 setup-windows.ps1"
             ) from error
+        FreeXScraper._enable_round_robin(API)
         return API, NoAccountError
+
+    @staticmethod
+    def _enable_round_robin(api_cls: Any) -> None:
+        """Prefer the least-recently-used Cookie instead of username order.
+
+        twscrape defaults to ORDER BY username, so two sessions pile onto the
+        alphabetically first label until it 403-locks.
+        """
+        if getattr(api_cls, "_incandescence_round_robin", False):
+            return
+        original_init = api_cls.__init__
+
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            original_init(self, *args, **kwargs)
+            pool = getattr(self, "pool", None)
+            if pool is not None:
+                pool._order_by = (
+                    "CASE WHEN last_used IS NULL THEN 0 ELSE 1 END, "
+                    "last_used ASC, username ASC"
+                )
+
+        api_cls.__init__ = __init__
+        api_cls._incandescence_round_robin = True
 
     async def health(self) -> dict[str, Any]:
         try:
@@ -340,6 +368,7 @@ class FreeXScraper:
         last_tweet_id: str | None,
         include_replies: bool,
         include_reposts: bool,
+        known_tweet_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         generator = (
             api.user_tweets_and_replies(user.id, limit=limit)
@@ -349,21 +378,22 @@ class FreeXScraper:
         tweets: list[dict[str, Any]] = []
         saw_any = False
         newest_seen: int | None = int(last_tweet_id) if last_tweet_id else None
-        boundary = int(last_tweet_id) if last_tweet_id else None
+        known = {int(value) for value in (known_tweet_ids or []) if str(value).strip()}
         old_streak = 0
         async with aclosing(generator) as stream:
             async for tweet in stream:
                 saw_any = True
                 tweet_id = int(tweet.id)
-                newest_seen = max(newest_seen or tweet_id, tweet_id)
-                if boundary is not None and tweet_id <= boundary:
+                if tweet.retweetedTweet is not None and not include_reposts:
+                    continue
+                if tweet_id in known:
+                    newest_seen = max(newest_seen or tweet_id, tweet_id)
                     old_streak += 1
-                    if old_streak >= 10:
+                    if old_streak >= KNOWN_TWEET_STOP_STREAK:
                         break
                     continue
                 old_streak = 0
-                if tweet.retweetedTweet is not None and not include_reposts:
-                    continue
+                newest_seen = max(newest_seen or tweet_id, tweet_id)
                 tweets.append(self._tweet_to_dict(tweet))
         return {"tweets": tweets, "saw_any": saw_any, "newest_seen": newest_seen}
 
@@ -392,6 +422,7 @@ class FreeXScraper:
         include_reposts: bool,
         NoAccountError: type[BaseException],
         API: Any,
+        known_tweet_ids: list[str] | None = None,
     ) -> tuple[Any, dict[str, Any]] | None:
         try:
             accounts = await pool_api.pool.get_all()
@@ -422,6 +453,7 @@ class FreeXScraper:
                         last_tweet_id=last_tweet_id,
                         include_replies=include_replies,
                         include_reposts=include_reposts,
+                        known_tweet_ids=known_tweet_ids,
                     )
                     if collected["saw_any"]:
                         return isolated_user, collected
@@ -441,6 +473,7 @@ class FreeXScraper:
         initial_limit: int,
         incremental_limit: int,
         reply_context_ids: list[str] | None = None,
+        known_tweet_ids: list[str] | None = None,
     ) -> dict[str, Any]:
         API, NoAccountError = self._imports()
         api = API(
@@ -474,6 +507,7 @@ class FreeXScraper:
                 last_tweet_id=last_tweet_id,
                 include_replies=include_replies,
                 include_reposts=include_reposts,
+                known_tweet_ids=known_tweet_ids,
             )
             if bool(getattr(user, "protected", False)) and not collected["saw_any"]:
                 fallback = await self._collect_protected_via_other_sessions(
@@ -486,6 +520,7 @@ class FreeXScraper:
                     include_reposts=include_reposts,
                     NoAccountError=NoAccountError,
                     API=API,
+                    known_tweet_ids=known_tweet_ids,
                 )
                 if fallback is not None:
                     user, collected = fallback

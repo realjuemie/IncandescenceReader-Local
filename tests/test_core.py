@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import hmac
 import json
 import sqlite3
 import tempfile
@@ -11,7 +9,6 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
-from urllib.parse import urlencode
 
 import httpx
 
@@ -19,7 +16,7 @@ from incandescence.auth import AdminAuth
 from incandescence.config import ConfigStore, normalize_proxy_url
 from incandescence.database import Database, normalize_username
 from incandescence.member_auth import MemberAuth
-from incandescence.notifications import BarkNotifier, TelegramNotifier
+from incandescence.notifications import BarkNotifier
 from incandescence.scraper import (
     FreeXScraper,
     extract_cookie_user_id,
@@ -28,12 +25,6 @@ from incandescence.scraper import (
 )
 from incandescence.share_auth import ShareAuth
 from incandescence.sync_service import SyncService
-from incandescence.telegram import (
-    TelegramAuthError,
-    TelegramBotClient,
-    TelegramService,
-    validate_init_data,
-)
 from incandescence.web import Application, create_server
 
 
@@ -289,56 +280,6 @@ class AdminAuthTests(unittest.TestCase):
 
 
 class MemberAuthTests(unittest.TestCase):
-    def test_telegram_defaults_follow_only_new_private_member_access(self):
-        with tempfile.TemporaryDirectory() as directory:
-            db = Database(Path(directory) / "reader.db")
-            public = db.create_account("public_user")
-            first_private = db.create_account("first_private")
-            second_private = db.create_account("second_private")
-            for account in (first_private, second_private):
-                db.update_account_options(
-                    account["id"],
-                    include_replies=True,
-                    include_reposts=False,
-                    is_public=False,
-                )
-            auth = MemberAuth(db)
-            member = auth.create_member(
-                "reader_one",
-                "member-password",
-                [public["id"], first_private["id"]],
-            )
-            user = {"id": "123456789", "username": "reader_one"}
-            auth.bind_telegram(member["id"], user)
-
-            defaults = auth.notification_settings(member["id"])
-            self.assertTrue(defaults["telegramEnabled"])
-            self.assertEqual(defaults["accountIds"], [first_private["id"]])
-
-            # A member can still opt out of an existing account. Reopening the
-            # Mini App must not silently restore that manual choice.
-            auth.update_notification_settings(
-                member["id"],
-                enabled=False,
-                server_url="https://api.day.app",
-                device_key=None,
-                clear_device_key=False,
-                group="XGlow",
-                account_ids=[],
-                telegram_enabled=True,
-            )
-            auth.bind_telegram(member["id"], user)
-            self.assertEqual(auth.notification_settings(member["id"])["accountIds"], [])
-
-            auth.update_member(
-                member["id"],
-                active=True,
-                account_ids=[public["id"], first_private["id"], second_private["id"]],
-            )
-            after_grant = auth.notification_settings(member["id"])
-            self.assertTrue(after_grant["telegramEnabled"])
-            self.assertEqual(after_grant["accountIds"], [second_private["id"]])
-
     def test_member_only_receives_assigned_private_accounts(self):
         with tempfile.TemporaryDirectory() as directory:
             db = Database(Path(directory) / "reader.db")
@@ -485,6 +426,20 @@ class CredentialSaveTests(unittest.TestCase):
 
 
 class ScraperMappingTests(unittest.TestCase):
+    def test_cookie_pool_prefers_least_recently_used(self):
+        class FakePool:
+            _order_by = "username"
+
+        class FakeAPI:
+            def __init__(self):
+                self.pool = FakePool()
+
+        FreeXScraper._enable_round_robin(FakeAPI)
+        api = FakeAPI()
+        self.assertIn("last_used ASC", api.pool._order_by)
+        FreeXScraper._enable_round_robin(FakeAPI)
+        self.assertTrue(FakeAPI._incandescence_round_robin)
+
     def test_profile_keeps_original_avatar_for_bark(self):
         user = SimpleNamespace(
             id="42",
@@ -643,7 +598,144 @@ class ScraperMappingTests(unittest.TestCase):
         self.assertEqual(mapped["300"]["author_username"], "other")
         self.assertEqual(mapped["301"]["reply_to_id"], "300")
 
+    def _timeline_user(self):
+        return SimpleNamespace(
+            id="42",
+            username="monitored",
+            displayname="Monitored",
+            rawDescription="",
+            profileImageUrl=None,
+            profileBannerUrl=None,
+            protected=False,
+            verified=False,
+            blue=False,
+            followersCount=1,
+            friendsCount=2,
+            statusesCount=3,
+            mediaCount=0,
+        )
 
+    def _timeline_tweet(self, tweet_id, author, text="post", *, retweeted=None):
+        media = SimpleNamespace(photos=[], videos=[], animated=[])
+        return SimpleNamespace(
+            id=tweet_id,
+            user=author,
+            rawContent=text,
+            date=datetime(2026, 1, 1, tzinfo=timezone.utc),
+            conversationId=tweet_id,
+            inReplyToTweetId=None,
+            inReplyToUser=None,
+            inReplyToScreenName=None,
+            lang="zh",
+            retweetedTweet=retweeted,
+            quotedTweet=None,
+            possibly_sensitive=False,
+            replyCount=0,
+            retweetCount=0,
+            likeCount=0,
+            quoteCount=0,
+            bookmarkedCount=0,
+            viewCount=0,
+            links=[],
+            url=f"https://x.com/{author.username}/status/{tweet_id}",
+            media=media,
+        )
+
+    def _timeline_scraper(self, items):
+        monitored = self._timeline_user()
+
+        class NoAccountError(RuntimeError):
+            pass
+
+        class FakeAPI:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            async def user_by_login(self, username):
+                return monitored
+
+            async def user_tweets_and_replies(self, user_id, limit=-1):
+                for item in items:
+                    yield item
+
+            async def user_tweets(self, user_id, limit=-1):
+                for item in items:
+                    yield item
+
+            async def tweet_details(self, tweet_id):
+                return None
+
+        class TimelineScraper(FreeXScraper):
+            @staticmethod
+            def _imports():
+                return FakeAPI, NoAccountError
+
+        return TimelineScraper
+
+    def test_incremental_backfills_hole_behind_newest_id(self):
+        author = self._timeline_user()
+        timeline = [
+            self._timeline_tweet("104", author, "4"),
+            self._timeline_tweet("103", author, "3"),
+            self._timeline_tweet("102", author, "2"),
+            self._timeline_tweet("101", author, "1"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                self._timeline_scraper(timeline)(Path(directory) / "sessions.db").fetch_latest(
+                    username="monitored",
+                    last_tweet_id="104",
+                    include_replies=True,
+                    include_reposts=False,
+                    initial_limit=20,
+                    incremental_limit=20,
+                    known_tweet_ids=["104", "103", "101"],
+                )
+            )
+        self.assertEqual([item["id"] for item in result["tweets"]], ["102"])
+        self.assertEqual(result["newestSeenId"], "104")
+
+    def test_skipped_reposts_do_not_hide_older_originals(self):
+        author = self._timeline_user()
+        dummy = self._timeline_tweet("1", author, "origin")
+        timeline = [
+            self._timeline_tweet("200", author, "rt", retweeted=dummy),
+            self._timeline_tweet("150", author, "original"),
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                self._timeline_scraper(timeline)(Path(directory) / "sessions.db").fetch_latest(
+                    username="monitored",
+                    last_tweet_id="100",
+                    include_replies=True,
+                    include_reposts=False,
+                    initial_limit=20,
+                    incremental_limit=20,
+                    known_tweet_ids=["100"],
+                )
+            )
+        self.assertEqual([item["id"] for item in result["tweets"]], ["150"])
+        self.assertEqual(result["newestSeenId"], "150")
+
+    def test_incremental_stops_after_known_streak_not_id_boundary(self):
+        author = self._timeline_user()
+        newest = [self._timeline_tweet(str(20 - i), author) for i in range(10)]
+        buried_hole = self._timeline_tweet("5", author, "hole")
+        with tempfile.TemporaryDirectory() as directory:
+            result = asyncio.run(
+                self._timeline_scraper(newest + [buried_hole])(
+                    Path(directory) / "sessions.db"
+                ).fetch_latest(
+                    username="monitored",
+                    last_tweet_id="20",
+                    include_replies=True,
+                    include_reposts=False,
+                    initial_limit=20,
+                    incremental_limit=20,
+                    known_tweet_ids=[str(20 - i) for i in range(10)],
+                )
+            )
+        self.assertEqual(result["tweets"], [])
 
     def test_protected_account_empty_timeline_is_not_success(self):
         media = SimpleNamespace(photos=[], videos=[], animated=[])
@@ -1268,58 +1360,6 @@ class DatabaseTests(unittest.TestCase):
 
 
 class WebRoutingTests(unittest.TestCase):
-    def test_telegram_webhook_acknowledges_background_command_failure(self):
-        class FailingTelegramService:
-            def __init__(self):
-                self.called = threading.Event()
-
-            async def handle_update(self, update):
-                self.called.set()
-                raise ValueError("bad queued command")
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            database = Database(root / "reader.db")
-            config = ConfigStore(root)
-            secret = "telegram_webhook_test_secret_1234"
-            config.update({"telegramWebhookSecret": secret})
-            service = FailingTelegramService()
-            application = Application(
-                data_dir=root,
-                public_dir=Path(__file__).resolve().parents[1] / "public",
-                database=database,
-                config=config,
-                admin_auth=AdminAuth(root),
-                member_auth=MemberAuth(database),
-                share_auth=ShareAuth(database),
-                notifier=SimpleNamespace(),
-                scraper=SimpleNamespace(),
-                sync_service=SimpleNamespace(),
-                scheduler=SimpleNamespace(),
-                scraper_runtime=SimpleNamespace(),
-                telegram_service=service,
-            )
-            server = create_server(("127.0.0.1", 0), application)
-            thread = threading.Thread(target=server.serve_forever, daemon=True)
-            thread.start()
-            url = (
-                f"http://127.0.0.1:{server.server_address[1]}"
-                f"/api/telegram/webhook/{secret}"
-            )
-            try:
-                response = httpx.post(
-                    url,
-                    headers={"X-Telegram-Bot-Api-Secret-Token": secret},
-                    json={"update_id": 1, "message": {"text": "/broken"}},
-                    timeout=3,
-                )
-                self.assertEqual(response.status_code, 200)
-                self.assertTrue(service.called.wait(timeout=1))
-            finally:
-                server.shutdown()
-                server.server_close()
-                thread.join(timeout=3)
-
     def test_member_login_outranks_admin_on_public_accounts(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -1384,7 +1424,6 @@ class WebRoutingTests(unittest.TestCase):
             database = Database(root / "reader.db")
             account = database.create_account("visible_account")
             config = ConfigStore(root)
-            config.update({"telegramBotUsername": "xglow_test_bot"})
             share_auth = ShareAuth(database)
             admin_auth = AdminAuth(root)
             admin_token = admin_auth.setup("test-admin-password")
@@ -1458,7 +1497,12 @@ class WebRoutingTests(unittest.TestCase):
                 blocked = httpx.get(
                     f"{base_url}/reader?account={private['id']}", timeout=3
                 )
-                self.assertEqual(blocked.status_code, 404)
+                self.assertEqual(blocked.status_code, 200)
+                self.assertIn("X拾光", blocked.text)
+                hidden_tweets = httpx.get(
+                    f"{base_url}/api/public/accounts/{private['id']}/tweets", timeout=3
+                )
+                self.assertEqual(hidden_tweets.status_code, 404)
                 denied_share = httpx.post(
                     f"{base_url}/api/admin/accounts/{private['id']}/shares",
                     json={"expiresInMinutes": 60},
@@ -1472,13 +1516,7 @@ class WebRoutingTests(unittest.TestCase):
                     timeout=3,
                 )
                 self.assertEqual(created_share.status_code, 201)
-                share_payload = created_share.json()
-                share_url = share_payload["url"]
-                share_token = share_url.rsplit("/", 1)[-1]
-                self.assertEqual(
-                    share_payload["telegramUrl"],
-                    f"https://t.me/xglow_test_bot?startapp=share_{share_token}",
-                )
+                share_url = created_share.json()["url"]
                 with httpx.Client(follow_redirects=False, timeout=3) as client:
                     opened = client.get(f"{base_url}{share_url}")
                     self.assertEqual(opened.status_code, 302)
@@ -1720,215 +1758,6 @@ class SyncTests(unittest.TestCase):
             )
             self.assertTrue(scraper.alerted)
             self.assertIsNotNone(db.get_account(account["id"])["last_sync_failed_at"])
-
-
-class TelegramIntegrationTests(unittest.TestCase):
-    TOKEN = "123456789:abcdefghijklmnopqrstuvwxyzABCDE"
-
-    @classmethod
-    def signed_init_data(cls, user: dict, auth_date: int) -> str:
-        values = {
-            "auth_date": str(auth_date),
-            "query_id": "AAExample",
-            "user": json.dumps(user, ensure_ascii=False, separators=(",", ":")),
-        }
-        check = "\n".join(f"{key}={values[key]}" for key in sorted(values))
-        secret = hmac.new(b"WebAppData", cls.TOKEN.encode(), hashlib.sha256).digest()
-        values["hash"] = hmac.new(secret, check.encode(), hashlib.sha256).hexdigest()
-        return urlencode(values)
-
-    def test_mini_app_signature_validation_rejects_tampering_and_expiry(self):
-        now = 1_800_000_000
-        init_data = self.signed_init_data(
-            {"id": 123456789, "first_name": "Test", "username": "tester"}, now
-        )
-        user = validate_init_data(init_data, self.TOKEN, now=now)
-        self.assertEqual(user["id"], "123456789")
-        with self.assertRaises(TelegramAuthError):
-            validate_init_data(init_data.replace("tester", "attacker"), self.TOKEN, now=now)
-        with self.assertRaises(TelegramAuthError):
-            validate_init_data(init_data, self.TOKEN, now=now + 601)
-
-    def test_telegram_identity_is_unique_and_notification_target_is_authorized(self):
-        with tempfile.TemporaryDirectory() as directory:
-            db = Database(Path(directory) / "reader.db")
-            account = db.create_account("example")
-            auth = MemberAuth(db)
-            first = auth.create_member("first", "password-one", [])
-            second = auth.create_member("second", "password-two", [])
-            user = {"id": "123456789", "username": "tester", "first_name": "T"}
-            db.bind_member_telegram(first["id"], user)
-            with self.assertRaises(ValueError):
-                db.bind_member_telegram(second["id"], user)
-            db.update_member_notification_settings(
-                first["id"],
-                enabled=False,
-                server_url="https://api.day.app",
-                device_key=None,
-                group="XGlow",
-                account_ids=[account["id"]],
-                telegram_enabled=True,
-            )
-            targets = db.list_member_telegram_notification_targets(account["id"])
-            self.assertEqual(targets[0]["telegram_user_id"], "123456789")
-
-    def test_member_upgrade_and_new_private_access_notify_telegram_user(self):
-        class CapturingClient:
-            def __init__(self):
-                self.messages = []
-
-            async def send_message(
-                self, chat_id, text, *, reply_markup=None, parse_mode=None
-            ):
-                self.messages.append(
-                    {
-                        "chat_id": str(chat_id),
-                        "text": text,
-                        "reply_markup": reply_markup,
-                        "parse_mode": parse_mode,
-                    }
-                )
-
-        with tempfile.TemporaryDirectory() as directory:
-            root = Path(directory)
-            db = Database(root / "reader.db")
-            public = db.create_account("public_user")
-            private = db.create_account("private_user")
-            db.update_account_options(
-                private["id"],
-                include_replies=True,
-                include_reposts=False,
-                is_public=False,
-            )
-            db.upsert_telegram_user(
-                {"id": "123456789", "username": "tester", "first_name": "T"},
-                chat_id="123456789",
-            )
-            config = ConfigStore(root)
-            config.update({"siteBaseUrl": "https://x.example.test"})
-            auth = MemberAuth(db)
-            client = CapturingClient()
-            service = TelegramService(
-                config,
-                db,
-                AdminAuth(root),
-                auth,
-                client,
-            )
-
-            granted = asyncio.run(service.grant_member("123456789"))
-            member = granted["member"]
-            self.assertTrue(member["active"])
-            self.assertTrue(granted["notification"]["sent"])
-            self.assertIn("升级为 X拾光会员", client.messages[-1]["text"])
-            self.assertEqual(
-                client.messages[-1]["reply_markup"]["inline_keyboard"][0][0]["web_app"]["url"],
-                "https://x.example.test",
-            )
-
-            auth.update_member(
-                member["id"], active=False, account_ids=member["accountIds"]
-            )
-            reactivated = asyncio.run(service.grant_member("123456789"))["member"]
-            self.assertTrue(reactivated["active"])
-
-            access_notice = asyncio.run(
-                service.notify_account_access_granted(
-                    member["id"], [public["id"], private["id"]]
-                )
-            )
-            self.assertTrue(access_notice["sent"])
-            self.assertIn("@private_user", client.messages[-1]["text"])
-            self.assertNotIn("@public_user", client.messages[-1]["text"])
-            self.assertIn(
-                '<a href="https://x.com/private_user">@private_user</a>',
-                client.messages[-1]["text"],
-            )
-            self.assertEqual(client.messages[-1]["parse_mode"], "HTML")
-
-    def test_bot_deploy_configures_webhook_menu_and_commands(self):
-        calls = []
-
-        def handle(request: httpx.Request) -> httpx.Response:
-            method = request.url.path.rsplit("/", 1)[-1]
-            calls.append((method, json.loads(request.content or b"{}")))
-            result = (
-                {"id": 123456789, "username": "xglow_test_bot", "first_name": "XGlow"}
-                if method == "getMe"
-                else True
-            )
-            return httpx.Response(200, json={"ok": True, "result": result})
-
-        with tempfile.TemporaryDirectory() as directory:
-            config = ConfigStore(Path(directory))
-            config.update(
-                {
-                    "telegramBotToken": self.TOKEN,
-                    "siteBaseUrl": "https://x.example.test",
-                }
-            )
-            client = TelegramBotClient(config, transport=httpx.MockTransport(handle))
-            result = asyncio.run(client.deploy())
-            self.assertEqual(result["username"], "xglow_test_bot")
-            self.assertEqual(
-                [method for method, _ in calls],
-                ["getMe", "setWebhook", "setChatMenuButton", "setMyCommands"],
-            )
-            webhook = calls[1][1]
-            self.assertTrue(webhook["url"].startswith("https://x.example.test/api/telegram/webhook/"))
-            self.assertEqual(webhook["secret_token"], config.get()["telegramWebhookSecret"])
-            self.assertEqual(calls[2][1]["menu_button"], {"type": "commands"})
-            self.assertEqual(calls[3][1]["scope"], {"type": "all_private_chats"})
-
-    def test_notification_reader_button_reopens_as_authenticated_mini_app(self):
-        button = TelegramNotifier._link_button(
-            "https://x.example.test/reader?account=7",
-            "查看内容",
-            mini_app=True,
-        )["inline_keyboard"][0][0]
-        self.assertEqual(
-            button["web_app"]["url"],
-            "https://x.example.test/reader?account=7",
-        )
-        self.assertNotIn("url", button)
-
-    def test_telegram_x_username_links_to_x_profile_instead_of_tg_mention(self):
-        payloads = []
-
-        def handle(request: httpx.Request) -> httpx.Response:
-            payloads.append(json.loads(request.content))
-            return httpx.Response(200, json={"ok": True, "result": {"message_id": 1}})
-
-        with tempfile.TemporaryDirectory() as directory:
-            config = ConfigStore(Path(directory))
-            config.update(
-                {
-                    "telegramBotToken": self.TOKEN,
-                    "telegramEnabled": True,
-                    "siteBaseUrl": "https://x.example.test",
-                }
-            )
-            notifier = TelegramNotifier(
-                config,
-                TelegramBotClient(config, transport=httpx.MockTransport(handle)),
-            )
-            asyncio.run(
-                notifier.notify_account_update(
-                    account_id=7,
-                    profile={"username": "x_author", "display_name": "A < B"},
-                    tweets=[sample_tweet("301", "new <content>")],
-                    inserted=1,
-                    chat_id="123456789",
-                )
-            )
-
-        payload = payloads[0]
-        self.assertEqual(payload["parse_mode"], "HTML")
-        self.assertIn(
-            '<a href="https://x.com/x_author">@x_author</a>', payload["text"]
-        )
-        self.assertIn("A &lt; B", payload["text"])
-        self.assertIn("new &lt;content&gt;", payload["text"])
 
 
 if __name__ == "__main__":

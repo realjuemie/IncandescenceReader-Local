@@ -174,6 +174,35 @@ class RequestHandler(BaseHTTPRequestHandler):
                     }
                 )
                 return
+            if path == "/api/public/assistant":
+                settings = self.app.config.get()
+                self._json(
+                    {
+                        "enabled": bool(settings.get("assistantEnabled", True)),
+                        "name": settings.get("assistantContactName") or "作者",
+                        "tagline": settings.get("assistantContactTagline") or "",
+                        "telegram": settings.get("assistantContactTelegram") or "",
+                        "email": settings.get("assistantContactEmail") or "",
+                        "home": settings.get("assistantContactHome")
+                        or settings.get("siteBaseUrl")
+                        or "",
+                        "x": settings.get("assistantContactX") or "",
+                        "wechat": settings.get("assistantContactWechat") or "",
+                        "custom": [
+                            {
+                                "label": settings.get(f"assistantCustom{i}Label") or "",
+                                "value": settings.get(f"assistantCustom{i}Value") or "",
+                                "href": settings.get(f"assistantCustom{i}Href") or "",
+                            }
+                            for i in (1, 2, 3)
+                            if str(settings.get(f"assistantCustom{i}Value") or "").strip()
+                        ],
+                    }
+                )
+                return
+            if path == "/api/public/hitokoto":
+                self._json({"text": self._hitokoto_line()})
+                return
             if path == "/api/public/accounts":
                 member = self._member()
                 is_admin = self._admin_authenticated() and member is None
@@ -713,6 +742,27 @@ class RequestHandler(BaseHTTPRequestHandler):
             asyncio.run(self.app.telegram_service.handle_update(update))
         except Exception as error:
             self.log_error("Telegram update processing failed: %s", error)
+
+    def _hitokoto_line(self) -> str:
+        import httpx
+
+        proxy = self.app.config.proxy_url() or None
+        urls = (
+            "https://v1.hitokoto.cn/?encode=json&charset=utf-8",
+            "https://international.v1.hitokoto.cn/?encode=json&charset=utf-8",
+        )
+        for url in urls:
+            try:
+                with httpx.Client(timeout=8.0, proxy=proxy, follow_redirects=True) as client:
+                    data = client.get(url).json()
+                line = str(data.get("hitokoto") or "").strip()
+                if not line:
+                    continue
+                source = str(data.get("from_who") or data.get("from") or "").strip()
+                return f"{line}  —— {source}" if source else line
+            except Exception:
+                continue
+        return ""
 
     def _admin_authenticated(self) -> bool:
         return self.app.admin_auth.authenticated(self.headers.get("Cookie"))

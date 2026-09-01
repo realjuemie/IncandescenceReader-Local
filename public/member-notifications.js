@@ -54,7 +54,7 @@
         </fieldset>
         <div class="member-notification-result" id="member-bark-result" role="status"></div>
         <footer>
-          <button type="button" class="text-button danger-text" id="member-bark-clear">${i18n.locale === "en" ? "Clear key" : "清除密钥"}</button>
+          <button type="button" class="danger-button" id="member-bark-clear">${i18n.locale === "en" ? "Clear key" : "清除密钥"}</button>
           <span></span>
           <button type="button" class="secondary-button" id="member-bark-test">${t("test")}</button>
           <button type="submit" class="primary-button" id="member-bark-save">${t("save")}</button>

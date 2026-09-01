@@ -61,6 +61,7 @@ class SyncService:
                 initial_limit=settings["initialFetchLimit"],
                 incremental_limit=settings["incrementalScanLimit"],
                 reply_context_ids=self.database.missing_reply_context_ids(account_id),
+                known_tweet_ids=self.database.list_tweet_ids(account_id),
             )
             result = (
                 await self.scraper_runtime.await_result(fetch)

@@ -73,6 +73,7 @@ function bindEvents() {
   $("#admin-member-list").addEventListener("click", handleMemberAction);
   $("#admin-member-list").addEventListener("input", rememberMemberDraft);
   $("#save-settings").addEventListener("click", saveSettings);
+  $("#save-assistant").addEventListener("click", saveAssistant);
   $("#save-proxy").addEventListener("click", saveProxy);
   $("#test-proxy").addEventListener("click", testProxy);
   $("#save-bark").addEventListener("click", saveBark);
@@ -990,6 +991,19 @@ function fillSettings() {
   $("#incremental-limit").value = settings.incrementalScanLimit || 500;
   $("#media-concurrency").value = settings.mediaConcurrency || 3;
   $("#max-media-mb").value = settings.maxMediaMb || 250;
+  $("#assistant-enabled").checked = settings.assistantEnabled !== false;
+  $("#assistant-name").value = settings.assistantContactName || "作者";
+  $("#assistant-tagline").value = settings.assistantContactTagline || "";
+  $("#assistant-telegram").value = settings.assistantContactTelegram || "";
+  $("#assistant-email").value = settings.assistantContactEmail || "";
+  $("#assistant-home").value = settings.assistantContactHome || "";
+  $("#assistant-x").value = settings.assistantContactX || "";
+  $("#assistant-wechat").value = settings.assistantContactWechat || "";
+  for (const index of [1, 2, 3]) {
+    $(`#assistant-custom-${index}-label`).value = settings[`assistantCustom${index}Label`] || "";
+    $(`#assistant-custom-${index}-value`).value = settings[`assistantCustom${index}Value`] || "";
+    $(`#assistant-custom-${index}-href`).value = settings[`assistantCustom${index}Href`] || "";
+  }
   $("#proxy-enabled").checked = Boolean(settings.proxyEnabled);
   $("#proxy-url").value = settings.proxyUrl || "";
   $("#bark-enabled").checked = Boolean(settings.barkEnabled);
@@ -1135,7 +1149,7 @@ function renderTelegramUsers() {
     actions.className = "telegram-user-actions";
     const copyButton = document.createElement("button");
     copyButton.type = "button";
-    copyButton.className = "text-button";
+    copyButton.className = "secondary-button";
     copyButton.textContent = i18n.locale === "en" ? "Copy ID" : "复制 ID";
     copyButton.addEventListener("click", async () => {
       await navigator.clipboard.writeText(String(user.user_id));
@@ -1336,6 +1350,38 @@ async function saveSettings() {
     fillSettings();
     renderStats();
     showToast(t("schedulerSaved"));
+  } catch (error) { showToast(error.message, true); }
+  finally { button.disabled = false; }
+}
+
+async function saveAssistant() {
+  const button = $("#save-assistant");
+  button.disabled = true;
+  try {
+    state.settings = await api("/api/admin/settings", {
+      method: "PUT",
+      body: {
+        assistantEnabled: $("#assistant-enabled").checked,
+        assistantContactName: $("#assistant-name").value,
+        assistantContactTagline: $("#assistant-tagline").value,
+        assistantContactTelegram: $("#assistant-telegram").value,
+        assistantContactEmail: $("#assistant-email").value,
+        assistantContactHome: $("#assistant-home").value,
+        assistantContactX: $("#assistant-x").value,
+        assistantContactWechat: $("#assistant-wechat").value,
+        assistantCustom1Label: $("#assistant-custom-1-label").value,
+        assistantCustom1Value: $("#assistant-custom-1-value").value,
+        assistantCustom1Href: $("#assistant-custom-1-href").value,
+        assistantCustom2Label: $("#assistant-custom-2-label").value,
+        assistantCustom2Value: $("#assistant-custom-2-value").value,
+        assistantCustom2Href: $("#assistant-custom-2-href").value,
+        assistantCustom3Label: $("#assistant-custom-3-label").value,
+        assistantCustom3Value: $("#assistant-custom-3-value").value,
+        assistantCustom3Href: $("#assistant-custom-3-href").value,
+      },
+    });
+    fillSettings();
+    showToast(i18n.locale === "en" ? "Assistant saved" : "小助手设置已保存");
   } catch (error) { showToast(error.message, true); }
   finally { button.disabled = false; }
 }

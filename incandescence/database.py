@@ -427,6 +427,14 @@ class Database:
             )
             db.commit()
 
+    def list_tweet_ids(self, account_id: int) -> list[str]:
+        with self.connection() as db:
+            rows = db.execute(
+                "SELECT id FROM tweets WHERE account_id = ?",
+                (account_id,),
+            ).fetchall()
+        return [str(row["id"]) for row in rows]
+
     def mark_sync_failed(self, account_id: int, error: str) -> None:
         message = (error or "同步失败")[:1000]
         now = utc_now()
